@@ -1,0 +1,33 @@
+﻿<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ledger | Simple Finance Tracker</title><link rel="stylesheet" href="/styles.css"><script type="module" src="/app.js"></script></head>
+<body>
+<header><a class="brand" href="/" aria-label="Ledger home"><span class="mark">L</span> Ledger<span class="brand-note">FINANCE TRACKER</span></a><span class="single">Your business, at a glance</span></header>
+<main>
+<section class="intro"><div><p class="eyebrow">KEEP IT SIMPLE</p><h1>A little clarity for your finances.</h1><p>Record what comes in, track what goes out, and know where you stand.</p></div><span class="currency">USD · Single user</span></section>
+<div id="message" role="status" aria-live="polite"></div>
+<section class="totals" aria-label="All-time financial overview">
+<article class="balance"><span>Current balance</span><strong id="balance">—</strong><small>All income minus all expenses</small></article>
+<article><span><i class="dot income-dot"></i>Total income</span><strong id="income">—</strong><small>All recorded income</small></article>
+<article><span><i class="dot expense-dot"></i>Total expenses</span><strong id="expenses">—</strong><small>All recorded expenses</small></article>
+</section>
+<div class="workspace">
+<section class="panel entry"><div class="section-head"><h2 id="form-title">Add a transaction</h2><p>Small records. Better habits.</p></div>
+<form id="transaction-form"><fieldset id="entry-fields"><div class="type-choice"><label><input type="radio" name="type" value="income" checked> Income</label><label><input type="radio" name="type" value="expense"> Expense</label></div>
+<label for="amount">Amount (USD)</label><input id="amount" name="amount" type="number" min="0.01" max="9999999.99" step="0.01" placeholder="0.00" required>
+<label for="date">Date</label><input id="date" name="date" type="date" min="0001-01-01" max="9999-12-31" required>
+<label for="category">Category</label><select id="category" name="category_id" required></select>
+<label for="description">Description <span class="optional">optional</span></label><input id="description" name="description" maxlength="250" placeholder="What was this for?">
+<button class="primary" id="save" type="submit">Add transaction</button><button id="cancel" class="secondary" type="button" hidden>Cancel editing</button>
+</fieldset></form></section>
+<section class="panel history"><div class="section-head history-heading"><div><h2>Transaction history</h2><p>Your income and expenses, in one place.</p></div><span id="count" class="count">0 records</span></div>
+<div class="filters"><div><label for="filter-type">Type</label><select id="filter-type"><option value="">All transactions</option><option value="income">Income</option><option value="expense">Expenses</option></select></div><div><label for="filter-category">Category</label><select id="filter-category"><option value="">All categories</option></select></div></div>
+<div class="table-scroll"><table><thead><tr><th>Date / Description</th><th>Category</th><th>Type</th><th class="amount-col">Amount</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="transactions"></tbody></table></div>
+<div id="empty" class="empty" hidden><span class="empty-icon">↔</span><h3>A fresh start.</h3><p>Add your first transaction to begin tracking.<br>If you have records, try changing your filters.</p></div>
+<button id="retry" class="secondary" type="button" hidden>Retry loading</button>
+<p class="history-foot">Newest first · Overview totals always include all transactions</p>
+</section></div>
+<footer>Ledger · Simple Business Finance Tracker <span>One place for the essentials.</span></footer>
+</main>
+<dialog id="delete-dialog"><form method="dialog"><h2>Delete transaction?</h2><p>This permanently removes the selected record.</p><div class="dialog-actions"><button value="cancel" class="secondary">Keep record</button><button value="delete" class="danger">Delete transaction</button></div></form></dialog>
+</body></html>
