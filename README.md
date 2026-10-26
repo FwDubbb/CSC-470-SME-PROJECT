@@ -1,4 +1,4 @@
-# Simple Business Finance Tracker
+﻿# Simple Business Finance Tracker
 
 A separate class project focused on income, expenses, predefined categories, transaction history, and three all-time totals. No inventory, accounts, authentication, reporting, or other SME modules.
 
@@ -94,21 +94,16 @@ This project was written independently with AI assistance. The existing SME Busi
 
 **Before submitting, check your syllabus or ask your instructor whether concept reuse from your own prior work and AI-assisted development are permitted.** Follow any disclosure or citation requirements. The development session did not have access to course rules and cannot certify compliance.
 
-## GitHub publication later
+## Repository
 
-The project already has an independent local Git repository. Remote creation and pushing were deferred at the owner's request after existing GitHub credentials were rejected. No remote repository was created and no source was pushed.
+This standalone finance tracker is maintained at https://github.com/FwDubbb/CSC-470-SME-PROJECT. It is separate from the original SME Business Management System. The repository name reflects the course project; the application's scope remains limited to basic income and expense tracking.
 
-After authenticating with GitHub CLI, run from this project directory:
-
-```sh
-gh repo create csc-finance-tracker --private --source=. --remote=origin --push
-```
-
-Or create an empty GitHub repository named `csc-finance-tracker`, then:
+Clone and run:
 
 ```sh
-git remote add origin https://github.com/YOUR_USERNAME/csc-finance-tracker.git
-git push -u origin main
+git clone https://github.com/FwDubbb/CSC-470-SME-PROJECT.git
+cd CSC-470-SME-PROJECT
+npm start
 ```
 
-Do not initialize the remote with a README if using these commands.
+Requires Node.js 24.10 or later. No package installation is needed. Open http://localhost:3000.
