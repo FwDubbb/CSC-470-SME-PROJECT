@@ -54,6 +54,17 @@ try {
   await evaluate("document.querySelector('.actions .delete').click()");await wait("document.getElementById('delete-dialog').open");
   await evaluate("document.querySelector('#delete-dialog button[value=delete]').click()");await wait("document.getElementById('count').textContent==='0 records'");
   await evaluate("document.getElementById('clear-filters').click()");await wait("document.getElementById('count').textContent==='1 record'");
+  await evaluate("document.getElementById('item-name').value='Notebook';document.getElementById('item-quantity').value='10';document.getElementById('item-price').value='3.25';document.getElementById('inventory-form').requestSubmit()");
+  await wait("document.querySelectorAll('#inventory-items tr').length===1 && !document.getElementById('inventory-fields').disabled");
+  assert.equal(await evaluate("document.querySelectorAll('#inventory-items td')[1].textContent"),'10');
+  await evaluate("document.querySelector('#inventory-items .actions button').click();document.getElementById('item-quantity').value='0';document.getElementById('inventory-form').requestSubmit()");
+  await wait("document.querySelector('#inventory-items .badge').textContent==='Out of stock' && !document.getElementById('inventory-fields').disabled");
+  await evaluate("document.getElementById('inventory-search').value='missing';document.getElementById('inventory-search').dispatchEvent(new Event('input'))");
+  assert.equal(await evaluate("document.querySelectorAll('#inventory-items tr').length"),0);
+  await evaluate("document.getElementById('inventory-search').value='';document.getElementById('inventory-search').dispatchEvent(new Event('input'))");
+  await send('Page.reload');await wait("!!document.querySelector('#inventory-items .badge') && document.querySelector('#inventory-items .badge').textContent==='Out of stock'");
+  assert.equal(await evaluate("document.getElementById('balance').textContent"),'$150.25');
+  assert.equal(await evaluate("document.getElementById('inventory-message').classList.contains('error')"),false);
   assert.equal(await evaluate("document.getElementById('message').classList.contains('error')"),false, 'UI shows an unexpected error');
   const artifacts=resolve('artifacts');mkdirSync(artifacts,{recursive:true});
   const desktop=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});writeFileSync(join(artifacts,'desktop.png'),Buffer.from(desktop.data,'base64'));
@@ -62,8 +73,17 @@ try {
   const mobile=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});writeFileSync(join(artifacts,'mobile.png'),Buffer.from(mobile.data,'base64'));
   await evaluate("document.getElementById('logout').click()");await wait("!document.getElementById('login-view').hidden && document.getElementById('finance-view').hidden");
   assert.equal(await evaluate("document.querySelectorAll('#transactions tr').length"),0);
+  assert.equal(await evaluate("document.querySelectorAll('#inventory-items tr').length"),0);
+  await evaluate("document.getElementById('username').value='browser-owner';document.getElementById('password').value='browser-only-long-passphrase';document.getElementById('login-form').requestSubmit()");
+  await wait("document.querySelectorAll('#inventory-items tr').length===1 && !document.getElementById('finance-view').hidden");
+  await evaluate("document.querySelector('#inventory-items .delete').click()");await wait("document.getElementById('inventory-delete-dialog').open");
+  await evaluate("document.querySelector('#inventory-delete-dialog button[value=cancel]').click()");await wait("!document.getElementById('inventory-delete-dialog').open && !document.querySelector('#inventory-items .delete').disabled");
+  assert.equal(await evaluate("document.querySelectorAll('#inventory-items tr').length"),1);
+  await evaluate("document.querySelector('#inventory-items .delete').click()");await wait("document.getElementById('inventory-delete-dialog').open");
+  await evaluate("document.querySelector('#inventory-delete-dialog button[value=delete]').click()");await wait("document.querySelectorAll('#inventory-items tr').length===0");
+  assert.equal(await evaluate("document.getElementById('inventory-message').classList.contains('error')"),false);
   assert.deepEqual(errors,[]);
-  console.log('Browser checks passed: first-run signup, automatic login, subsequent sign-in, income/expense entry, edit, duplicate review, filtering, totals, delete confirmation, mobile layout, and logout. Screenshots: artifacts/desktop.png and artifacts/mobile.png');
+  console.log('Browser checks passed: first-run signup, automatic login, subsequent sign-in, income/expense entry, edit, duplicate review, filtering, totals, delete confirmation, mobile layout, inventory CRUD/search/reload, and logout. Screenshots: artifacts/desktop.png and artifacts/mobile.png');
 } finally {
   try{await closeBrowser?.();await new Promise(r=>setTimeout(r,500));}catch{}
   socket?.close();

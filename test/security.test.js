@@ -149,3 +149,38 @@ test('first-run browser signup validates credentials, signs in, and closes perma
   const hosted=await start(':memory:',{secureCookies:true});
   try{assert.equal((await hosted.call('/api/auth/signup','POST',{username:'owner',password,confirmPassword:password})).status,403);}finally{await hosted.close();}
 });
+
+test('inventory CRUD, validation, authentication, persistence, and backup recovery',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'ledger-inventory-')),file=join(dir,'db.sqlite'),snapshot=join(dir,'backup.sqlite'),prior=join(dir,'prior.sqlite');let app;
+  const item={name:'Notebook',quantity:12,unit_price:'3.25'};
+  try {
+    app=await start(file);await setOwner(app.db,'owner',password);
+    assert.equal((await app.call('/api/inventory')).status,401);
+    assert.equal((await app.call('/api/inventory','POST',item)).status,401);
+    let auth=await app.login();
+    assert.equal((await app.call('/api/inventory','POST',item,auth,{'X-CSRF-Token':''})).status,403);
+    assert.deepEqual((await app.call('/api/inventory','GET',undefined,auth)).data,[]);
+    for(const invalid of [null,[],{},...[-1,1.5,1000001,'5'].map(quantity=>({...item,quantity})),{...item,name:' '},{...item,name:'x'.repeat(101)},...['-1','3.001','NaN','10000000'].map(unit_price=>({...item,unit_price})),{...item,unit_price:3}]) assert.equal((await app.call('/api/inventory','POST',invalid,auth)).status,400);
+    const created=await app.call('/api/inventory','POST',item,auth);assert.equal(created.status,201);assert.equal(created.data.unit_price_cents,325);
+    const id=created.data.id;
+    assert.equal((await app.call('/api/inventory','POST',{...item,name:' NOTEBOOK '},auth)).status,409);
+    assert.equal((await app.call('/api/inventory/'+id,'PUT',{...item,quantity:0,unit_price:'0.00'},auth)).status,200);
+    assert.equal((await app.call('/api/inventory','GET',undefined,auth)).data[0].quantity,0);
+    assert.deepEqual((await app.call('/api/summary','GET',undefined,auth)).data.allTime,{income:0,expenses:0,balance:0});
+    assert.equal((await app.call('/api/inventory/999','PUT',item,auth)).status,404);
+    await app.close();app=null;app=await start(file);auth=await app.login();
+    assert.equal((await app.call('/api/inventory','GET',undefined,auth)).data[0].name,'Notebook');
+    await app.close();app=null;await makeBackup(file,snapshot);
+    const changed=new DatabaseSync(file);changed.exec('DELETE FROM inventory');changed.close();
+    await restoreBackup(snapshot,file,prior);app=await start(file);auth=await app.login();
+    assert.equal((await app.call('/api/inventory','GET',undefined,auth)).data.length,1);
+    assert.equal((await app.call('/api/inventory/'+id,'DELETE',undefined,auth)).status,200);
+    assert.equal((await app.call('/api/inventory/'+id,'DELETE',undefined,auth)).status,404);
+    assert.deepEqual((await app.call('/api/inventory','GET',undefined,auth)).data,[]);
+    await app.close();app=null;
+    const old=new DatabaseSync(snapshot);old.exec('DROP TABLE inventory');old.close();
+    await restoreBackup(snapshot,file,join(dir,'before-old-restore.sqlite'));app=await start(file);auth=await app.login();
+    assert.deepEqual((await app.call('/api/inventory','GET',undefined,auth)).data,[]);
+    assert.equal((await app.call('/api/inventory','POST',item,auth)).status,201);
+  }finally{if(app)await app.close();rmSync(dir,{recursive:true,force:true});}
+});

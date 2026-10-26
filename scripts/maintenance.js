@@ -1,3 +1,4 @@
+import { initializeInventory } from '../server/inventory.js';
 import { pathToFileURL } from 'node:url';
 ﻿import { DatabaseSync,backup } from 'node:sqlite';
 import { mkdirSync, existsSync, renameSync, rmSync } from 'node:fs';
@@ -12,6 +13,10 @@ export function validateBackup(db) {
     const actual=db.prepare(`PRAGMA table_info(${table})`).all().map(row=>row.name);
     if(!columns.every(column=>actual.includes(column))) throw new Error('Not a compatible finance tracker backup.');
   }
+  if(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='inventory'").get()) {
+    const columns=db.prepare('PRAGMA table_info(inventory)').all().map(row=>row.name);
+    if(!['id','name','quantity','unit_price_cents'].every(name=>columns.includes(name))) throw new Error('Backup contains an incompatible inventory table.');
+  }
   if(db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Backup contains broken database relationships.');
 }
 export async function makeBackup(source,target) {
@@ -24,7 +29,7 @@ export async function restoreBackup(source,target,priorBackup) {
   try {
     await makeBackup(source,staged);
     const restored=new DatabaseSync(staged);
-    try{initializeAuth(restored);restored.exec('DELETE FROM sessions; DELETE FROM login_limits; PRAGMA journal_mode=DELETE;');}finally{restored.close();}
+    try{initializeAuth(restored);initializeInventory(restored);restored.exec('DELETE FROM sessions; DELETE FROM login_limits; PRAGMA journal_mode=DELETE;');}finally{restored.close();}
     if(existsSync(target)) {
       await makeBackup(target,priorBackup);
       const current=new DatabaseSync(target);try{current.exec('PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE;');}finally{current.close();}

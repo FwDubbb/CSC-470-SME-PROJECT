@@ -42,7 +42,7 @@ test('CRUD, filtering, exact-cent totals, HTML serving, and restart persistence'
     await app.close();app=null;
     app=await start(filename);
     assert.equal((await app.request('/api/transactions')).body.items.length,2);
-    assert.equal(app.db.prepare("SELECT count(*) count FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").get().count,5);
+    assert.equal(app.db.prepare("SELECT count(*) count FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").get().count,6);
     assert.equal((await app.request('/api/transactions/'+a.body.id,'DELETE')).status,200);
     assert.deepEqual((await app.request('/api/summary')).body.allTime,{income:0,expenses:2505,balance:-2505});
     assert.equal((await app.request('/api/transactions/'+b.body.id,'DELETE')).status,200);

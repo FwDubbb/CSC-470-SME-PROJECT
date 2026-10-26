@@ -1,3 +1,4 @@
+import { validateInventory } from './inventory.js';
 ﻿import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
@@ -7,7 +8,7 @@ import { databasePath, lockDatabase } from './storage.js';
 import { filters, summary, listTransactions, csv } from './queries.js';
 
 const publicDirectory=new URL('../public/',import.meta.url);
-const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/styles.css':['styles.css','text/css']};
+const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/inventory.js':['inventory.js','text/javascript'],'/styles.css':['styles.css','text/css']};
 function respond(res,status,body) {res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(body));}
 async function readBody(req) {
   if(req.headers['content-type']?.split(';')[0].trim()!=='application/json') throw new Error('Send JSON data.');
@@ -94,6 +95,21 @@ export function createApp(filename,{secureCookies=process.env.NODE_ENV==='produc
         db.exec('BEGIN IMMEDIATE');
         try {db.prepare('UPDATE users SET password_hash=? WHERE id=1').run(passwordHash);db.exec('DELETE FROM sessions; DELETE FROM login_limits; COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
         clearCookie(res,secureCookies);return respond(res,200,{message:'Password changed. Sign in again on all devices.'});
+      }
+      if(req.method==='GET' && url.pathname==='/api/inventory') return respond(res,200,db.prepare('SELECT * FROM inventory ORDER BY name COLLATE NOCASE,id').all());
+      const inventoryMatch=url.pathname.match(/^\/api\/inventory\/([1-9]\d*)$/);
+      if((req.method==='POST' && url.pathname==='/api/inventory') || (req.method==='PUT' && inventoryMatch)) {
+        const item=validateInventory(await readBody(req));
+        const id=inventoryMatch?Number(inventoryMatch[1]):null;
+        if(id && !db.prepare('SELECT id FROM inventory WHERE id=?').get(id)) return respond(res,404,{error:'Inventory item not found.'});
+        const duplicate=db.prepare('SELECT id FROM inventory WHERE name=? COLLATE NOCASE').get(item.name);
+        if(duplicate && duplicate.id!==id) return respond(res,409,{error:'An item with this name already exists. Edit its quantity instead.'});
+        if(id) {db.prepare('UPDATE inventory SET name=?,quantity=?,unit_price_cents=? WHERE id=?').run(item.name,item.quantity,item.unit_price_cents,id);return respond(res,200,{id,...item});}
+        const result=db.prepare('INSERT INTO inventory(name,quantity,unit_price_cents) VALUES (?,?,?)').run(item.name,item.quantity,item.unit_price_cents);
+        return respond(res,201,{id:Number(result.lastInsertRowid),...item});
+      }
+      if(req.method==='DELETE' && inventoryMatch) {
+        const result=db.prepare('DELETE FROM inventory WHERE id=?').run(Number(inventoryMatch[1]));return respond(res,result.changes?200:404,result.changes?{message:'Inventory item deleted.'}:{error:'Inventory item not found.'});
       }
       if(req.method==='GET' && url.pathname==='/api/categories') return respond(res,200,db.prepare('SELECT * FROM categories ORDER BY id').all());
       if(req.method==='GET' && ['/api/summary','/api/transactions','/api/export'].includes(url.pathname)) {

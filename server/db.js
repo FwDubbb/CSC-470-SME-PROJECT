@@ -1,3 +1,4 @@
+import { initializeInventory } from './inventory.js';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -22,6 +23,7 @@ export function openDatabase(filename) {
   for (const [type, names] of Object.entries({ income: ['Sales','Services','Other Income'], expense: ['Rent','Utilities','Supplies','Transportation','Other Expenses'] })) {
     for (const name of names) seed.run(name,type);
   }
+  initializeInventory(db);
   return db;
 }
 

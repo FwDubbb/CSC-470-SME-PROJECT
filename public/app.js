@@ -1,3 +1,4 @@
+import { createInventory } from './inventory.js';
 ﻿const $ = (id) => document.getElementById(id);
 const form = $('transaction-form');
 const money = (cents) => new Intl.NumberFormat('en-US', {style:'currency',currency:'USD'}).format(cents/100);
@@ -11,6 +12,7 @@ async function api(path,options={}) {
   if(!response.ok) throw new Error(body.error || 'Something went wrong. Please retry.');
   return body;
 }
+const inventory=createInventory({api,money});
 function fillCategories() {
   const current=$('category').value;
   $('category').replaceChildren(...categories.filter(c=>c.type===form.elements.type.value).map(c=>new Option(c.name,c.id)));
@@ -111,6 +113,7 @@ async function initialize() {
   $('entry-fields').disabled=true;
   try {
     categories=await api('/api/categories');
+    await inventory.load();
     const selected=$('filter-category').value;
     $('filter-category').replaceChildren(new Option('All categories',''),...categories.map(c=>new Option(c.name,c.id)));
     $('filter-category').value=selected;resetForm();await refresh();$('entry-fields').disabled=false;message('');
@@ -129,6 +132,7 @@ function setAuthMode(createAccount) {
   $('setup-note').hidden=!createAccount;
 }
 function showLogin(text='') {
+  inventory.clear();
   authenticated=false;csrfToken=null;requestVersion++;clearTimeout(searchTimer);
   records=[];total=0;editingId=null;render();form.reset();
   for(const name of ['income','expenses','balance']) {$(name).textContent='\u2014';$('filtered-'+name).textContent='\u2014';}

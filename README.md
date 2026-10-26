@@ -1,6 +1,6 @@
 ﻿# Ledger — Simple Business Finance Tracker
 
-A small, single-owner class project with login, income/expense CRUD, predefined categories, date/category/type filters, description search, all-time and filtered totals, CSV export, pagination, duplication, and database backup/restore.
+A small, single-owner class project with login, income/expense CRUD, predefined categories, date/category/type filters, description search, all-time and filtered totals, CSV export, pagination, duplication, basic inventory management, and database backup/restore.
 
 Repository: https://github.com/FwDubbb/CSC-470-SME-PROJECT
 
@@ -34,6 +34,12 @@ Existing finance databases retain their records. If no owner has been created, t
 Income categories: Sales, Services, Other Income. Expense categories: Rent, Utilities, Supplies, Transportation, Other Expenses. Categories remain predefined.
 
 Amounts are USD, stored as integer cents, and must be between $0.01 and $9,999,999.99 per transaction. Dates may be past or future; future entries count immediately. Balance is recorded income minus expenses, without bank integration or an opening balance feature.
+
+## Basic inventory
+
+Use the Inventory link to add items with a name, quantity in stock, and unit price in USD. Search by name, edit to update stock or price, and delete after confirmation. Zero quantity is marked Out of stock. Item names are unique without regard to letter case. Quantities are whole numbers from 0 to 1,000,000; prices can be zero and allow at most two decimal places.
+
+Inventory is intentionally manual: stock changes do not create financial transactions, and income entries do not reduce stock. There are no suppliers, purchase orders, automatic sales processing, stock-movement history, or additional inventory reports. Inventory requires login and shares the existing database and backups. Older finance-only backups restore successfully with an empty inventory list.
 
 ## Password recovery
 
@@ -104,7 +110,7 @@ test/       Finance and security integration tests
 data/       Ignored local database and backups
 ```
 
-The two finance tables remain `categories(id,name,type)` and `transactions(id,type,amount_cents,date,category_id,description)`. A composite foreign key enforces category/type consistency. Authentication adds `users` (one owner), `sessions`, and `login_limits`, without duplicating finance tables.
+The two finance tables remain `categories(id,name,type)` and `transactions(id,type,amount_cents,date,category_id,description)`. A composite foreign key enforces category/type consistency. A single `inventory(id,name,quantity,unit_price_cents)` table stores stock. Authentication adds `users` (one owner), `sessions`, and `login_limits`, without duplicating finance tables.
 
 ## Tests
 
@@ -126,6 +132,10 @@ Optional browser checks require installed Chrome/Edge (or `BROWSER_PATH`). They 
 | POST | `/api/auth/login` | Sign in |
 | POST | `/api/auth/logout` | Revoke session |
 | POST | `/api/auth/password` | Change password/revoke sessions |
+| GET | `/api/inventory` | List inventory items |
+| POST | `/api/inventory` | Add an item |
+| PUT | `/api/inventory/:id` | Update an item |
+| DELETE | `/api/inventory/:id` | Delete an item |
 | GET | `/api/categories` | Fixed categories |
 | GET | `/api/transactions` | Paginated history |
 | POST | `/api/transactions` | Create |
@@ -140,7 +150,7 @@ History, summary, and export accept `type`, `category`, `start`, `end`, and `sea
 {"type":"income","amount":"125.50","date":"2026-10-26","category_id":1,"description":"Sales payment"}
 ```
 
-Write amounts are decimal strings; reads return `amount_cents` integers.
+Write amounts are decimal strings; reads return `amount_cents` integers. Inventory writes use `{name,quantity,unit_price}`; unit_price is a decimal string, quantity is an integer, and reads return unit_price_cents.
 
 ## Course originality
 

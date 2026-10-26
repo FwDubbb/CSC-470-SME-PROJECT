@@ -6,7 +6,8 @@
 <main>
 <section id="login-view" class="panel login-panel"><div class="section-head"><p class="eyebrow">YOUR PRIVATE LEDGER</p><h1 id="auth-title">Welcome back.</h1><p id="auth-subtitle">Sign in to access your financial records.</p></div><form id="login-form"><label for="username">Username</label><input id="username" autocomplete="username" minlength="3" maxlength="40" required><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" maxlength="128" required><div id="signup-confirm" hidden><label for="signup-confirm-password">Confirm password</label><input id="signup-confirm-password" type="password" autocomplete="new-password" minlength="15" maxlength="128" disabled></div><button id="login-button" class="primary" disabled>Sign in</button><p id="login-message" role="status" aria-live="polite"></p></form><p id="setup-note" class="setup-note" hidden>Create your owner account here to get started. Choose a username and a password with 15&ndash;128 characters. This ledger supports one owner account.</p></section>
 <div id="finance-view" hidden>
-<section class="intro"><div><p class="eyebrow">KEEP IT SIMPLE</p><h1>A little clarity for your finances.</h1><p>Record what comes in, track what goes out, and know where you stand.</p></div><span class="currency">USD · Single user</span></section>
+<nav class="section-nav" aria-label="Sections"><a href="#finance-section">Finances</a><a href="#inventory-section">Inventory</a></nav>
+<section id="finance-section" class="intro"><div><p class="eyebrow">KEEP IT SIMPLE</p><h1>A little clarity for your finances.</h1><p>Record what comes in, track what goes out, and know where you stand.</p></div><span class="currency">USD · Single user</span></section>
 <div id="message" role="status" aria-live="polite"></div>
 <section class="totals" aria-label="All-time financial overview">
 <article class="balance"><span>Current balance</span><strong id="balance">—</strong><small>All income minus all expenses</small></article>
@@ -30,9 +31,26 @@
 <button id="retry" class="secondary" type="button" hidden>Retry loading</button>
 <div class="pagination"><button id="previous-page" class="secondary" type="button">Previous</button><span id="page-info" aria-live="polite">Page 1 of 1</span><button id="next-page" class="secondary" type="button">Next</button><label for="page-size">Per page</label><select id="page-size"><option>20</option><option>50</option><option>100</option></select></div><p class="history-foot">Newest first &middot; Main cards show all-time totals &middot; Matching totals and CSV use all active filters</p>
 </section></div>
+<section id="inventory-section" class="inventory-section" aria-labelledby="inventory-heading">
+<div class="intro"><div><p class="eyebrow">KEEP STOCK IN SIGHT</p><h2 id="inventory-heading">Inventory</h2><p>Keep a simple list of what you have and update quantities as stock changes.</p></div><span id="inventory-count" class="count">0 items</span></div>
+<div id="inventory-message" role="status" aria-live="polite"></div>
+<div class="workspace">
+<section class="panel entry"><div class="section-head"><h3 id="inventory-form-title">Add an item</h3><p>Just the essentials for your stock.</p></div>
+<form id="inventory-form"><fieldset id="inventory-fields"><label for="item-name">Item name</label><input id="item-name" maxlength="100" placeholder="e.g. Notebook" required>
+<label for="item-quantity">Quantity in stock</label><input id="item-quantity" type="number" min="0" max="1000000" step="1" value="0" required>
+<label for="item-price">Unit price (USD)</label><input id="item-price" type="number" min="0" max="9999999.99" step="0.01" value="0.00" required>
+<button id="inventory-save" class="primary" type="submit">Add item</button><button id="inventory-cancel" class="secondary" type="button" hidden>Cancel editing</button></fieldset></form></section>
+<section class="panel history"><div class="section-head"><h3>Items in stock</h3><p>Edit an item to update its quantity or price.</p></div>
+<div class="filters"><div><label for="inventory-search">Find an item</label><input id="inventory-search" type="search" maxlength="100" placeholder="Search item names..."></div></div>
+<div class="table-scroll"><table><thead><tr><th>Item</th><th>Quantity</th><th>Unit price</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="inventory-items"></tbody></table></div>
+<div id="inventory-empty" class="empty"><h3>No items yet.</h3><p>Add your first item to start tracking stock.</p></div><button id="inventory-retry" class="secondary" type="button" hidden>Retry loading inventory</button>
+<p class="history-foot">Stock updates are manual. Inventory changes do not create income or expense records.</p></section>
+</div></section>
+
 <footer>Ledger · Simple Business Finance Tracker <span>One place for the essentials.</span></footer>
 </div>
 </main>
-<dialog id="password-dialog"><form id="password-form"><h2>Change password</h2><label for="current-password">Current password</label><input id="current-password" type="password" autocomplete="current-password" maxlength="128" required><label for="new-password">New password (15?128 characters)</label><input id="new-password" type="password" autocomplete="new-password" minlength="15" maxlength="128" required><label for="confirm-password">Confirm new password</label><input id="confirm-password" type="password" autocomplete="new-password" minlength="15" maxlength="128" required><p id="password-message" role="status"></p><div class="dialog-actions"><button id="password-cancel" type="button" class="secondary">Cancel</button><button id="password-save" class="primary">Change password</button></div></form></dialog>
+<dialog id="password-dialog"><form id="password-form"><h2>Change password</h2><label for="current-password">Current password</label><input id="current-password" type="password" autocomplete="current-password" maxlength="128" required><label for="new-password">New password (15-128 characters)</label><input id="new-password" type="password" autocomplete="new-password" minlength="15" maxlength="128" required><label for="confirm-password">Confirm new password</label><input id="confirm-password" type="password" autocomplete="new-password" minlength="15" maxlength="128" required><p id="password-message" role="status"></p><div class="dialog-actions"><button id="password-cancel" type="button" class="secondary">Cancel</button><button id="password-save" class="primary">Change password</button></div></form></dialog>
 <dialog id="delete-dialog"><form method="dialog"><h2>Delete transaction?</h2><p>This permanently removes the selected record.</p><div class="dialog-actions"><button value="cancel" class="secondary">Keep record</button><button value="delete" class="danger">Delete transaction</button></div></form></dialog>
+<dialog id="inventory-delete-dialog"><form method="dialog"><h2>Delete inventory item?</h2><p id="inventory-delete-name"></p><p>This permanently removes the item from your stock list.</p><div class="dialog-actions"><button class="secondary" value="cancel">Keep item</button><button class="danger" value="delete">Delete item</button></div></form></dialog>
 </body></html>
