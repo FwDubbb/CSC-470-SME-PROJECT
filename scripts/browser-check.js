@@ -1,0 +1,70 @@
+﻿import assert from 'node:assert/strict';
+import { spawn,execFileSync } from 'node:child_process';
+import { mkdtempSync,readFileSync,existsSync,rmSync,mkdirSync,writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join,resolve } from 'node:path';
+import { once } from 'node:events';
+import { createApp } from '../server/index.js';
+import { setOwner } from '../server/auth.js';
+const executable=process.env.BROWSER_PATH || ['C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
+if(!executable) throw new Error('Set BROWSER_PATH to a Chrome or Edge executable to run browser checks.');
+const folder=mkdtempSync(join(tmpdir(),'ledger-browser-'));let browser,socket,app,closeBrowser;
+try {
+  app=createApp(join(folder,'test.sqlite'));await setOwner(app.db,'browser-owner','browser-only-long-passphrase');
+  app.server.listen(0,'127.0.0.1');await once(app.server,'listening');const url=`http://127.0.0.1:${app.server.address().port}`;
+  browser=spawn(executable,['--headless=new','--no-first-run','--no-default-browser-check','--remote-debugging-port=0','--user-data-dir='+join(folder,'profile'),'about:blank'],{stdio:'ignore',windowsHide:true});
+  const portFile=join(folder,'profile','DevToolsActivePort');
+  for(let n=0;n<100 && !existsSync(portFile);n++) await new Promise(r=>setTimeout(r,100));
+  if(!existsSync(portFile))throw new Error('Browser debugging endpoint did not start.');
+  const port=readFileSync(portFile,'utf8').split('\n')[0];
+  const target=await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();
+  socket=new WebSocket(target.webSocketDebuggerUrl);await once(socket,'open');
+  let id=0;const pending=new Map(),errors=[];
+  socket.addEventListener('message',event=>{const message=JSON.parse(event.data);if(message.method==='Runtime.exceptionThrown')errors.push(message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text);const request=pending.get(message.id);if(request){pending.delete(message.id);clearTimeout(request.timer);message.error?request.reject(new Error(message.error.message)):request.resolve(message.result);}});
+  const send=(method,params={})=>new Promise((resolve,reject)=>{const requestId=++id;const timer=setTimeout(()=>{pending.delete(requestId);reject(new Error('Browser command timeout: '+method));},12000);pending.set(requestId,{resolve,reject,timer});socket.send(JSON.stringify({id:requestId,method,params}));});
+  closeBrowser=()=>send('Browser.close');
+  const evaluate=async(expression)=>{const result=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);return result.result.value;};
+  const wait=async(expression)=>{for(let i=0;i<80;i++){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,100));}throw new Error('UI condition timed out: '+expression+'; details: '+JSON.stringify(await evaluate("({login:document.getElementById('login-message')?.textContent,message:document.getElementById('message')?.textContent,location:location.href})"))+'; errors: '+JSON.stringify(errors));};
+  await send('Runtime.enable');await send('Page.enable');
+  await send('Emulation.setDeviceMetricsOverride',{width:1365,height:1000,deviceScaleFactor:1,mobile:false});
+  await send('Page.navigate',{url});await wait("!!document.getElementById('login-button') && !document.getElementById('login-button').disabled");
+  await evaluate("document.getElementById('username').value='browser-owner';document.getElementById('password').value='browser-only-long-passphrase';document.getElementById('login-form').requestSubmit()");
+  await wait("!document.getElementById('finance-view').hidden && !document.getElementById('entry-fields').disabled");
+  await evaluate("document.getElementById('amount').value='150.25';document.getElementById('description').value='Browser test income';document.getElementById('transaction-form').requestSubmit()");
+  await wait("document.getElementById('count').textContent==='1 record'");
+  assert.equal(await evaluate("document.getElementById('balance').textContent"),'$150.25');
+  await evaluate("document.querySelector('input[value=expense]').click();document.getElementById('amount').value='25.10';document.getElementById('description').value='Browser rent';document.getElementById('transaction-form').requestSubmit()");
+  await wait("document.getElementById('count').textContent==='2 records'");
+  assert.equal(await evaluate("document.getElementById('balance').textContent"),'$125.15');
+  await evaluate("[...document.querySelectorAll('.actions button')].find(b=>b.textContent==='Duplicate').click()");
+  assert.equal(await evaluate("document.getElementById('save').textContent"),'Add duplicate');
+  await evaluate("document.getElementById('cancel').click()");
+  await evaluate("[...document.querySelectorAll('.actions button')].find(b=>b.textContent==='Edit').click();document.getElementById('amount').value='20.00';document.getElementById('transaction-form').requestSubmit()");
+  await wait("document.getElementById('balance').textContent==='$130.25'");
+  await evaluate("document.getElementById('filter-search').value='rent';document.getElementById('filter-search').dispatchEvent(new Event('input'))");
+  await wait("document.getElementById('count').textContent==='1 record'");
+  assert.equal(await evaluate("document.getElementById('filtered-expenses').textContent"),'$20.00');
+  await evaluate("document.querySelector('.actions .delete').click()");await wait("document.getElementById('delete-dialog').open");
+  await evaluate("document.querySelector('#delete-dialog button[value=cancel]').click()");
+  await wait("!document.getElementById('delete-dialog').open && !document.querySelector('.actions .delete').disabled");
+  assert.equal(await evaluate("document.getElementById('count').textContent"),'1 record');
+  await evaluate("document.querySelector('.actions .delete').click()");await wait("document.getElementById('delete-dialog').open");
+  await evaluate("document.querySelector('#delete-dialog button[value=delete]').click()");await wait("document.getElementById('count').textContent==='0 records'");
+  await evaluate("document.getElementById('clear-filters').click()");await wait("document.getElementById('count').textContent==='1 record'");
+  assert.equal(await evaluate("document.getElementById('message').classList.contains('error')"),false, 'UI shows an unexpected error');
+  const artifacts=resolve('artifacts');mkdirSync(artifacts,{recursive:true});
+  const desktop=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});writeFileSync(join(artifacts,'desktop.png'),Buffer.from(desktop.data,'base64'));
+  await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  assert.ok(await evaluate('document.documentElement.scrollWidth<=window.innerWidth'), 'Mobile viewport has horizontal page overflow');
+  const mobile=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});writeFileSync(join(artifacts,'mobile.png'),Buffer.from(mobile.data,'base64'));
+  await evaluate("document.getElementById('logout').click()");await wait("!document.getElementById('login-view').hidden && document.getElementById('finance-view').hidden");
+  assert.equal(await evaluate("document.querySelectorAll('#transactions tr').length"),0);
+  assert.deepEqual(errors,[]);
+  console.log('Browser checks passed: login, income/expense entry, edit, duplicate review, filtering, totals, delete confirmation, mobile layout, and logout. Screenshots: artifacts/desktop.png and artifacts/mobile.png');
+} finally {
+  try{await closeBrowser?.();await new Promise(r=>setTimeout(r,500));}catch{}
+  socket?.close();
+  if(browser && browser.exitCode===null){try{if(process.platform==='win32')execFileSync('taskkill',['/PID',String(browser.pid),'/T','/F'],{stdio:'ignore',windowsHide:true});else browser.kill();}catch{}}
+  if(app){await new Promise(resolve=>app.server.close(resolve));app.db.close();}
+  try{rmSync(folder,{recursive:true,force:true,maxRetries:10,retryDelay:100});}catch{console.warn('Browser temporary profile cleanup was blocked by Windows.');}
+}

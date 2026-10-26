@@ -2,8 +2,10 @@
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ledger | Simple Finance Tracker</title><link rel="stylesheet" href="/styles.css"><script type="module" src="/app.js"></script></head>
 <body>
-<header><a class="brand" href="/" aria-label="Ledger home"><span class="mark">L</span> Ledger<span class="brand-note">FINANCE TRACKER</span></a><span class="single">Your business, at a glance</span></header>
+<header><a class="brand" href="/" aria-label="Ledger home"><span class="mark">L</span> Ledger<span class="brand-note">FINANCE TRACKER</span></a><div id="account-controls" hidden><span id="owner-name" class="single"></span> <button id="change-password" class="secondary" type="button">Password</button> <button id="logout" class="secondary" type="button">Sign out</button></div></header>
 <main>
+<section id="login-view" class="panel login-panel"><div class="section-head"><p class="eyebrow">YOUR PRIVATE LEDGER</p><h1>Welcome back.</h1><p>Sign in to access your financial records.</p></div><form id="login-form"><label for="username">Username</label><input id="username" autocomplete="username" minlength="3" maxlength="40" required><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" maxlength="128" required><button id="login-button" class="primary" disabled>Sign in</button><p id="login-message" role="status" aria-live="polite"></p></form><p id="setup-note" class="setup-note" hidden>First-time setup: stop the server and run <code>npm run account:setup</code> in your terminal to choose your owner username and password. Then restart the app.</p></section>
+<div id="finance-view" hidden>
 <section class="intro"><div><p class="eyebrow">KEEP IT SIMPLE</p><h1>A little clarity for your finances.</h1><p>Record what comes in, track what goes out, and know where you stand.</p></div><span class="currency">USD · Single user</span></section>
 <div id="message" role="status" aria-live="polite"></div>
 <section class="totals" aria-label="All-time financial overview">
@@ -11,6 +13,7 @@
 <article><span><i class="dot income-dot"></i>Total income</span><strong id="income">—</strong><small>All recorded income</small></article>
 <article><span><i class="dot expense-dot"></i>Total expenses</span><strong id="expenses">—</strong><small>All recorded expenses</small></article>
 </section>
+<section class="period-overview" aria-label="Filtered financial overview"><div><strong>Matching records</strong><small>All active filters &middot; All matching pages</small></div><span>Income <b id="filtered-income">&mdash;</b></span><span>Expenses <b id="filtered-expenses">&mdash;</b></span><span>Balance <b id="filtered-balance">&mdash;</b></span></section>
 <div class="workspace">
 <section class="panel entry"><div class="section-head"><h2 id="form-title">Add a transaction</h2><p>Small records. Better habits.</p></div>
 <form id="transaction-form"><fieldset id="entry-fields"><div class="type-choice"><label><input type="radio" name="type" value="income" checked> Income</label><label><input type="radio" name="type" value="expense"> Expense</label></div>
@@ -21,13 +24,15 @@
 <button class="primary" id="save" type="submit">Add transaction</button><button id="cancel" class="secondary" type="button" hidden>Cancel editing</button>
 </fieldset></form></section>
 <section class="panel history"><div class="section-head history-heading"><div><h2>Transaction history</h2><p>Your income and expenses, in one place.</p></div><span id="count" class="count">0 records</span></div>
-<div class="filters"><div><label for="filter-type">Type</label><select id="filter-type"><option value="">All transactions</option><option value="income">Income</option><option value="expense">Expenses</option></select></div><div><label for="filter-category">Category</label><select id="filter-category"><option value="">All categories</option></select></div></div>
+<div class="filters"><div><label for="filter-type">Type</label><select id="filter-type"><option value="">All transactions</option><option value="income">Income</option><option value="expense">Expenses</option></select></div><div><label for="filter-category">Category</label><select id="filter-category"><option value="">All categories</option></select></div><div><label for="filter-start">From</label><input type="date" id="filter-start" min="0001-01-01" max="9999-12-31"></div><div><label for="filter-end">Through</label><input type="date" id="filter-end" min="0001-01-01" max="9999-12-31"></div><div class="search-filter"><label for="filter-search">Search descriptions</label><input id="filter-search" type="search" maxlength="250" placeholder="Find a transaction..."></div></div><div class="history-tools"><label for="period">Quick period</label><select id="period"><option value="">Custom / all dates</option><option value="month">This month</option><option value="last-month">Last month</option><option value="year">This year</option></select><button id="clear-filters" class="secondary" type="button">Clear filters</button><button id="export" class="secondary" type="button">Export CSV</button></div>
 <div class="table-scroll"><table><thead><tr><th>Date / Description</th><th>Category</th><th>Type</th><th class="amount-col">Amount</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="transactions"></tbody></table></div>
 <div id="empty" class="empty" hidden><span class="empty-icon">↔</span><h3>A fresh start.</h3><p>Add your first transaction to begin tracking.<br>If you have records, try changing your filters.</p></div>
 <button id="retry" class="secondary" type="button" hidden>Retry loading</button>
-<p class="history-foot">Newest first · Overview totals always include all transactions</p>
+<div class="pagination"><button id="previous-page" class="secondary" type="button">Previous</button><span id="page-info" aria-live="polite">Page 1 of 1</span><button id="next-page" class="secondary" type="button">Next</button><label for="page-size">Per page</label><select id="page-size"><option>20</option><option>50</option><option>100</option></select></div><p class="history-foot">Newest first &middot; Main cards show all-time totals &middot; Matching totals and CSV use all active filters</p>
 </section></div>
 <footer>Ledger · Simple Business Finance Tracker <span>One place for the essentials.</span></footer>
+</div>
 </main>
+<dialog id="password-dialog"><form id="password-form"><h2>Change password</h2><label for="current-password">Current password</label><input id="current-password" type="password" autocomplete="current-password" maxlength="128" required><label for="new-password">New password (15?128 characters)</label><input id="new-password" type="password" autocomplete="new-password" minlength="15" maxlength="128" required><label for="confirm-password">Confirm new password</label><input id="confirm-password" type="password" autocomplete="new-password" minlength="15" maxlength="128" required><p id="password-message" role="status"></p><div class="dialog-actions"><button id="password-cancel" type="button" class="secondary">Cancel</button><button id="password-save" class="primary">Change password</button></div></form></dialog>
 <dialog id="delete-dialog"><form method="dialog"><h2>Delete transaction?</h2><p>This permanently removes the selected record.</p><div class="dialog-actions"><button value="cancel" class="secondary">Keep record</button><button value="delete" class="danger">Delete transaction</button></div></form></dialog>
 </body></html>

@@ -1,109 +1,147 @@
-﻿# Simple Business Finance Tracker
+﻿# Ledger — Simple Business Finance Tracker
 
-A separate class project focused on income, expenses, predefined categories, transaction history, and three all-time totals. No inventory, accounts, authentication, reporting, or other SME modules.
+A small, single-owner class project with login, income/expense CRUD, predefined categories, date/category/type filters, description search, all-time and filtered totals, CSV export, pagination, duplication, and database backup/restore.
 
-## Structure
+Repository: https://github.com/FwDubbb/CSC-470-SME-PROJECT
 
-- `public/`: one responsive page, styles, and browser JavaScript
-- `server/`: HTTP API, input validation, and SQLite persistence
-- `test/`: isolated integration tests
-- `data/`: local database (ignored by Git)
+## Setup
 
-## Database
-
-Exactly two tables: `categories(id, name, type)` and `transactions(id, type, amount_cents, date, category_id, description)`. A composite foreign key ensures category and transaction types agree. Money uses integer cents. Categories are seeded automatically; transactions start empty.
-
-## Development approach
-
-Build this application independently, using the original SME project only as a reference for the finance-tracking concept and SQLite persistence. No original modules or source files are copied.
-
-## Setup and installation
-
-Install Node.js **24.10 or later** (tested with 24.10.0), which includes the SQLite module used here. Git is needed only for version control. There are no third-party packages to install, no database service, and no frontend build step.
-
-From this project directory:
+Install **Node.js 24.10 or later**. No third-party packages, database service, or build step are needed.
 
 ```sh
+git clone https://github.com/FwDubbb/CSC-470-SME-PROJECT.git
+cd CSC-470-SME-PROJECT
+npm run account:setup
 npm start
 ```
 
-Open **http://localhost:3000**. The server binds to your computer's loopback interface. Stop it with Ctrl+C. `npm run dev` restarts the server when server files change; refresh the browser after changing frontend files.
+Open **http://localhost:3000** and sign in. Existing checkouts can skip cloning. Owner setup runs in an interactive terminal with hidden password entry. Choose a username of 3–40 letters/digits/dots/underscores/hyphens and a unique passphrase of 15–128 characters. No default password or public registration is provided.
 
-SQLite tables and eight predefined categories are created automatically on first start. Your records are stored in `data/finance.sqlite` and survive server restarts. The database is excluded from Git. Node 24.10 may print an experimental SQLite warning; this is expected.
+Stop with Ctrl+C. `npm run dev` enables server auto-restart. Node 24.10 may print an experimental SQLite warning.
 
-Optional environment variables:
+Existing finance databases are migrated without deleting records. Stop the app, run owner setup, then restart to access your existing transactions behind login.
+
+## Usage
+
+- Record income or expenses with an amount, date, category, and optional description (250 characters maximum).
+- Edit, cancel unsaved edits, or delete after confirmation. Deletion is permanent.
+- Duplicate fills the form for review; saving creates a new transaction. Review its date before saving.
+- Combine type, category, inclusive start/end dates, and description search. Search treats `%` and `_` literally and is case-insensitive for basic Latin text.
+- Use This month, Last month, This year, or custom dates. Clear filters resets the selection.
+- Main cards show **all-time totals**. Matching-record totals use **all active filters across every page**.
+- Choose 20, 50, or 100 records per page. Export CSV downloads every matching record, including other pages.
+- Change password from the header with your current password. This revokes all sessions. Sign out revokes the current session and clears displayed records.
+
+Income categories: Sales, Services, Other Income. Expense categories: Rent, Utilities, Supplies, Transportation, Other Expenses. Categories remain predefined.
+
+Amounts are USD, stored as integer cents, and must be between $0.01 and $9,999,999.99 per transaction. Dates may be past or future; future entries count immediately. Balance is recorded income minus expenses, without bank integration or an opening balance feature.
+
+## Password recovery
+
+Stop the server and run:
+
+```sh
+npm run account:reset
+```
+
+Choose the owner username and new password. Finance data stays intact and all sessions are revoked. Recovery requires local machine access; there is no email recovery or multiple-user system.
+
+## Backup and restore
+
+Stop the server first. Database locking prevents maintenance during normal server operation.
+
+```sh
+npm run backup
+npm run restore -- "C:/path/to/finance-backup.sqlite"
+```
+
+Backup creates a consistent snapshot under `data/backups/` and prints its path. Copy it to a private safe location. Backups contain financial information and password hashes.
+
+Restore validates SQLite integrity, expected finance columns, and foreign keys before staging a replacement. It saves the current database as a **before-restore** backup, replaces the active database, and revokes restored sessions. Use only trusted backups. Sign in with the credentials in the backup, or reset the owner locally. Older finance backups without auth tables are supported; run account setup afterward.
+
+Database files, backups, locks, and browser screenshots are ignored by Git. Cloning GitHub retrieves source code, not your financial records.
+
+## Security
+
+- Asynchronous **scrypt** password hashing: random 16-byte salt, N=131072, r=8, p=1, 64-byte derived key. Passwords are never stored as plaintext. Hash comparisons use `timingSafeEqual`.
+- Random 256-bit session tokens; SQLite stores their SHA-256 hashes. Cookies use **HttpOnly**, **SameSite=Strict**, and **Secure** in production.
+- Sessions expire after 30 minutes idle or 12 hours total, survive restarts until expiry, and rotate on login. Logout invalidates the current session; password change/reset revokes all sessions.
+- Authenticated mutations require a session-specific CSRF token. Cross-origin browser writes are rejected. Tokens stay in browser memory rather than localStorage.
+- Five login attempts per source address within 15 minutes trigger a temporary block, persisted across restarts. Password-verification concurrency is bounded. Unknown users and incorrect passwords receive the same error.
+- All finance endpoints, including CSV downloads, require authentication.
+- Parameterized SQL, server input validation, safe text rendering, Content Security Policy, frame blocking, no-store caching, body limits, and request timeouts add protection.
+- CSV text is escaped and formula-like values are prefixed against spreadsheet formula execution. Some spreadsheet applications may display the prefix.
+
+This is a local class application, not an independently audited security product. Authentication does not encrypt SQLite or backups; filesystem access can bypass application controls. MFA, multiple users, email recovery, and distributed rate limiting are outside scope.
+
+The server binds to loopback. For deployment behind an HTTPS reverse proxy, set `NODE_ENV=production` and `APP_ORIGIN=https://your-host`. Production requires an HTTPS origin and enables Secure cookies and HSTS; TLS termination belongs to the proxy. Do not expose plain HTTP publicly. Hosting is not configured by this repository.
+
+References: [Node crypto](https://nodejs.org/api/crypto.html), [OWASP session management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html), [OWASP CSRF prevention](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html).
+
+## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `3000` | HTTP port |
-| `DB_PATH` | `data/finance.sqlite` inside this project | Alternative database file (relative paths resolve from the shell directory) |
+| `DB_PATH` | Project's `data/finance.sqlite` | Database for server and maintenance |
+| `NODE_ENV` | unset | `production` enables secure-cookie requirements |
+| `APP_ORIGIN` | Current local host | Exact origin; HTTPS required in production |
+| `BROWSER_PATH` | Installed Chrome/Edge on Windows | Browser for optional UI checks |
 
-PowerShell example:
+Relative `DB_PATH` values resolve from the shell directory. Set it consistently for every command. PowerShell example:
 
 ```powershell
 $env:PORT = '3001'
 npm start
 ```
 
-## Usage
+## Structure and database
 
-1. Select Income or Expense, then enter a positive USD amount, date, and category. Add an optional description up to 250 characters.
-2. Select **Add transaction**. The history and all-time totals refresh immediately after a successful save.
-3. Select **Edit** beside a record, change its details, and save. **Cancel editing** discards unsaved changes.
-4. Select **Delete**, then confirm removal in the dialog.
-5. Use the type and category filters together or separately. Filters affect history only; the dashboard always shows all recorded transactions.
+```text
+public/     Interface, styles, browser JavaScript
+server/     HTTP API, SQLite, auth, queries, database locking
+scripts/    Owner setup/reset, backup/restore, browser checks
+test/       Finance and security integration tests
+data/       Ignored local database and backups
+```
 
-The app starts with no sample transactions. It uses USD and supports amounts from $0.01 to $9,999,999.99 per record, with at most two decimal places. Both past and future dates are permitted. Categories are fixed and depend on the transaction type.
-
-This is a single-user local application with no registration or login. Run it locally; shared internet hosting would require a separate access-control decision. Back up the database with the server stopped; copy the `data/` folder to a safe location. Do not commit personal financial data.
+The two finance tables remain `categories(id,name,type)` and `transactions(id,type,amount_cents,date,category_id,description)`. A composite foreign key enforces category/type consistency. Authentication adds `users` (one owner), `sessions`, and `login_limits`, without duplicating finance tables.
 
 ## Tests
 
 ```sh
 npm test
+npm run test:browser
 ```
 
-Tests use temporary databases and never write to your real finance database. They exercise API CRUD, combined filters, empty and negative balances, integer-cent arithmetic, validation failures, missing records, category/type constraints, static-file serving, and reopening the same database after restart. Browser JavaScript syntax is also checked during development with `node --check public/app.js`.
+API tests use temporary databases and cover CRUD, filters, cents arithmetic, validation, persistence, migration, hashing, protected APIs, throttling, CSRF, session rotation/expiry/revocation, password changes, production cookie flags, CSV, pagination, backups, restore, and locking.
 
-Browser layout and interaction should be checked manually on desktop and mobile: add both transaction types, edit a record's type and amount, cancel an edit, dismiss and confirm a delete, combine filters, and reload the page. No automated browser verification was available in the development session.
+Optional browser checks require installed Chrome/Edge (or `BROWSER_PATH`). They use a temporary database/profile and check desktop/mobile workflows, writing ignored screenshots under `artifacts/`. They never access your real financial database. Browser checks are separate from the portable API suite.
 
 ## API
 
-All writes use JSON and return `{ "error": "message" }` on failure.
-
-| Method | Path | Result |
+| Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/categories` | Predefined categories |
-| GET | `/api/transactions?type=income&category=1` | Newest records first; both filters optional |
-| POST | `/api/transactions` | Create a record |
-| PUT | `/api/transactions/:id` | Replace a record's editable fields |
-| DELETE | `/api/transactions/:id` | Delete a record |
-| GET | `/api/summary` | All-time income, expenses, and balance in cents |
+| GET | `/api/auth/status` | Setup status/current session |
+| POST | `/api/auth/login` | Sign in |
+| POST | `/api/auth/logout` | Revoke session |
+| POST | `/api/auth/password` | Change password/revoke sessions |
+| GET | `/api/categories` | Fixed categories |
+| GET | `/api/transactions` | Paginated history |
+| POST | `/api/transactions` | Create |
+| PUT | `/api/transactions/:id` | Update |
+| DELETE | `/api/transactions/:id` | Delete |
+| GET | `/api/summary` | `{allTime,filtered}` cent totals |
+| GET | `/api/export` | Filtered CSV |
 
-Example write body:
+History, summary, and export accept `type`, `category`, `start`, `end`, and `search`. History also accepts `page` and `pageSize` (1–100), returning `{items,total,page,pageSize}`. Protected writes require the session cookie and `X-CSRF-Token` from login/status. Login uses `{username,password}`; password change uses `{currentPassword,newPassword}`. Errors return `{error: "message"}`.
 
 ```json
 {"type":"income","amount":"125.50","date":"2026-10-26","category_id":1,"description":"Sales payment"}
 ```
 
-Amounts must be decimal **strings** on writes; reads return integer `amount_cents`. Successful creation returns HTTP 201; updates and deletes return 200; invalid input returns 400; missing records return 404. SQL uses bound parameters and displayed text is rendered as text rather than HTML.
+Write amounts are decimal strings; reads return `amount_cents` integers.
 
-## Course originality and attribution
+## Course originality
 
-This project was written independently with AI assistance. The existing SME Business Management System was inspected only to understand its stack and financial-recordkeeping concept. Its source code, database, UI components, and unrelated modules were not copied. This project uses Node's built-in HTTP server and SQLite with plain browser JavaScript instead of the original React/Express application.
-
-**Before submitting, check your syllabus or ask your instructor whether concept reuse from your own prior work and AI-assisted development are permitted.** Follow any disclosure or citation requirements. The development session did not have access to course rules and cannot certify compliance.
-
-## Repository
-
-This standalone finance tracker is maintained at https://github.com/FwDubbb/CSC-470-SME-PROJECT. It is separate from the original SME Business Management System. The repository name reflects the course project; the application's scope remains limited to basic income and expense tracking.
-
-Clone and run:
-
-```sh
-git clone https://github.com/FwDubbb/CSC-470-SME-PROJECT.git
-cd CSC-470-SME-PROJECT
-npm start
-```
-
-Requires Node.js 24.10 or later. No package installation is needed. Open http://localhost:3000.
+Written independently with AI assistance. The original SME project was inspected for its stack and finance-tracking concept; source modules, components, and database were not copied. Check your course's rules for reuse and AI disclosure before submission. Course compliance has not been verified.

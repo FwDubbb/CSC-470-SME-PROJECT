@@ -1,1 +1,20 @@
-{"name":"csc-finance-tracker","version":"1.0.0","private":true,"type":"module","description":"Simple single-user business finance tracker","engines":{"node":">=24.10.0"},"scripts":{"start":"node server/index.js","dev":"node --watch server/index.js","test":"node --test"}}
+{
+  "name": "csc-finance-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Simple single-user business finance tracker",
+  "engines": {
+    "node": ">=24.10.0"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test",
+    "account:setup": "node scripts/account.js",
+    "account:reset": "node scripts/account.js --reset",
+    "backup": "node scripts/maintenance.js backup",
+    "restore": "node scripts/maintenance.js restore",
+    "test:browser": "node scripts/browser-check.js"
+  }
+}
