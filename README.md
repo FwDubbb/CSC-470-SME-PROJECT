@@ -11,15 +11,14 @@ Install **Node.js 24.10 or later**. No third-party packages, database service, o
 ```sh
 git clone https://github.com/FwDubbb/CSC-470-SME-PROJECT.git
 cd CSC-470-SME-PROJECT
-npm run account:setup
-npm start
+npm run dev
 ```
 
-Open **http://localhost:3000** and sign in. Existing checkouts can skip cloning. Owner setup runs in an interactive terminal with hidden password entry. Choose a username of 3–40 letters/digits/dots/underscores/hyphens and a unique passphrase of 15–128 characters. No default password or public registration is provided.
+Open **http://localhost:3000**. On first launch, choose a username and password using **Create account** in the browser. You are signed in automatically. Once the owner exists, this screen becomes **Sign in**, and additional account creation is blocked.
 
-Stop with Ctrl+C. `npm run dev` enables server auto-restart. Node 24.10 may print an experimental SQLite warning.
+Choose a username of 3-40 letters/digits/dots/underscores/hyphens and a unique password of 15-128 characters. No default password is shipped. Stop with Ctrl+C. The dev command enables server auto-restart; npm start runs without watching files. Node 24.10 may print an experimental SQLite warning.
 
-Existing finance databases are migrated without deleting records. Stop the app, run owner setup, then restart to access your existing transactions behind login.
+Existing finance databases retain their records. If no owner has been created, the first-run form appears; otherwise use your existing login. Browser signup is available on local loopback installations only. Hosted/production installations use npm run account:setup on the server before deployment. The terminal command remains available as an optional local setup method.
 
 ## Usage
 
@@ -123,6 +122,7 @@ Optional browser checks require installed Chrome/Edge (or `BROWSER_PATH`). They 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/auth/status` | Setup status/current session |
+| POST | `/api/auth/signup` | Create the first owner locally and sign in |
 | POST | `/api/auth/login` | Sign in |
 | POST | `/api/auth/logout` | Revoke session |
 | POST | `/api/auth/password` | Change password/revoke sessions |
@@ -134,7 +134,7 @@ Optional browser checks require installed Chrome/Edge (or `BROWSER_PATH`). They 
 | GET | `/api/summary` | `{allTime,filtered}` cent totals |
 | GET | `/api/export` | Filtered CSV |
 
-History, summary, and export accept `type`, `category`, `start`, `end`, and `search`. History also accepts `page` and `pageSize` (1–100), returning `{items,total,page,pageSize}`. Protected writes require the session cookie and `X-CSRF-Token` from login/status. Login uses `{username,password}`; password change uses `{currentPassword,newPassword}`. Errors return `{error: "message"}`.
+History, summary, and export accept `type`, `category`, `start`, `end`, and `search`. History also accepts `page` and `pageSize` (1–100), returning `{items,total,page,pageSize}`. Protected writes require the session cookie and `X-CSRF-Token` from login/status. First-run signup uses `{username,password,confirmPassword}`. Login uses `{username,password}`; password change uses `{currentPassword,newPassword}`. Errors return `{error: "message"}`.
 
 ```json
 {"type":"income","amount":"125.50","date":"2026-10-26","category_id":1,"description":"Sales payment"}

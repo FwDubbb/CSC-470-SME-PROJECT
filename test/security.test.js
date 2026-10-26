@@ -125,3 +125,27 @@ test('existing finance database migration, verified backup/restore, and maintena
     writeFileSync(file+'.lock','99999999');const releaseStale=lockDatabase(file);releaseStale();
   }finally{if(app)await app.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('first-run browser signup validates credentials, signs in, and closes permanently after setup',async()=>{
+  const app=await start();
+  try {
+    const signup=(body,headers={})=>app.call('/api/auth/signup','POST',body,{},headers);
+    assert.equal((await signup({username:'owner',password,confirmPassword:'wrong'})).status,400);
+    assert.equal((await signup({username:'x',password,confirmPassword:password})).status,400);
+    assert.equal((await signup({username:'owner',password:'short',confirmPassword:'short'})).status,400);
+    assert.equal((await signup({username:'owner',password,confirmPassword:password},{Origin:'http://evil.test'})).status,403);
+    assert.equal((await app.call('/api/auth/status')).data.configured,false);
+    const payload={username:'owner',password,confirmPassword:password};
+    const concurrent=await Promise.all([signup(payload),signup({...payload,username:'other-owner'})]);
+    assert.deepEqual(concurrent.map(r=>r.status).sort(),[201,409]);
+    const created=concurrent.find(r=>r.status===201);
+    const auth={cookie:created.response.headers.get('set-cookie').split(';')[0],csrf:created.data.csrfToken};
+    assert.equal((await app.call('/api/categories','GET',undefined,auth)).status,200);
+    assert.equal((await app.call('/api/auth/status')).data.configured,true);
+    assert.equal((await signup(payload)).status,409);
+    assert.equal(app.db.prepare('SELECT COUNT(*) n FROM users').get().n,1);
+    assert.equal((await app.login()).status,200);
+  }finally{await app.close();}
+  const hosted=await start(':memory:',{secureCookies:true});
+  try{assert.equal((await hosted.call('/api/auth/signup','POST',{username:'owner',password,confirmPassword:password})).status,403);}finally{await hosted.close();}
+});

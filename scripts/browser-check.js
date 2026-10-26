@@ -5,12 +5,11 @@ import { tmpdir } from 'node:os';
 import { join,resolve } from 'node:path';
 import { once } from 'node:events';
 import { createApp } from '../server/index.js';
-import { setOwner } from '../server/auth.js';
 const executable=process.env.BROWSER_PATH || ['C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 if(!executable) throw new Error('Set BROWSER_PATH to a Chrome or Edge executable to run browser checks.');
 const folder=mkdtempSync(join(tmpdir(),'ledger-browser-'));let browser,socket,app,closeBrowser;
 try {
-  app=createApp(join(folder,'test.sqlite'));await setOwner(app.db,'browser-owner','browser-only-long-passphrase');
+  app=createApp(join(folder,'test.sqlite'));
   app.server.listen(0,'127.0.0.1');await once(app.server,'listening');const url=`http://127.0.0.1:${app.server.address().port}`;
   browser=spawn(executable,['--headless=new','--no-first-run','--no-default-browser-check','--remote-debugging-port=0','--user-data-dir='+join(folder,'profile'),'about:blank'],{stdio:'ignore',windowsHide:true});
   const portFile=join(folder,'profile','DevToolsActivePort');
@@ -28,6 +27,10 @@ try {
   await send('Runtime.enable');await send('Page.enable');
   await send('Emulation.setDeviceMetricsOverride',{width:1365,height:1000,deviceScaleFactor:1,mobile:false});
   await send('Page.navigate',{url});await wait("!!document.getElementById('login-button') && !document.getElementById('login-button').disabled");
+  await evaluate("document.getElementById('username').value='browser-owner';document.getElementById('password').value='browser-only-long-passphrase';document.getElementById('signup-confirm-password').value='browser-only-long-passphrase';document.getElementById('login-form').requestSubmit()");
+  await wait("!document.getElementById('finance-view').hidden && !document.getElementById('entry-fields').disabled");
+  await evaluate("document.getElementById('logout').click()");await wait("!document.getElementById('login-view').hidden");
+  assert.equal(await evaluate("document.getElementById('login-button').textContent"),'Sign in');
   await evaluate("document.getElementById('username').value='browser-owner';document.getElementById('password').value='browser-only-long-passphrase';document.getElementById('login-form').requestSubmit()");
   await wait("!document.getElementById('finance-view').hidden && !document.getElementById('entry-fields').disabled");
   await evaluate("document.getElementById('amount').value='150.25';document.getElementById('description').value='Browser test income';document.getElementById('transaction-form').requestSubmit()");
@@ -60,7 +63,7 @@ try {
   await evaluate("document.getElementById('logout').click()");await wait("!document.getElementById('login-view').hidden && document.getElementById('finance-view').hidden");
   assert.equal(await evaluate("document.querySelectorAll('#transactions tr').length"),0);
   assert.deepEqual(errors,[]);
-  console.log('Browser checks passed: login, income/expense entry, edit, duplicate review, filtering, totals, delete confirmation, mobile layout, and logout. Screenshots: artifacts/desktop.png and artifacts/mobile.png');
+  console.log('Browser checks passed: first-run signup, automatic login, subsequent sign-in, income/expense entry, edit, duplicate review, filtering, totals, delete confirmation, mobile layout, and logout. Screenshots: artifacts/desktop.png and artifacts/mobile.png');
 } finally {
   try{await closeBrowser?.();await new Promise(r=>setTimeout(r,500));}catch{}
   socket?.close();

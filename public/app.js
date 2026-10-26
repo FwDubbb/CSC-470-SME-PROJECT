@@ -2,7 +2,7 @@
 const form = $('transaction-form');
 const money = (cents) => new Intl.NumberFormat('en-US', {style:'currency',currency:'USD'}).format(cents/100);
 let categories=[], records=[], editingId=null, requestVersion=0, mutating=false;
-let csrfToken=null, page=1, total=0, authenticated=false;
+let csrfToken=null, page=1, total=0, authenticated=false, signupMode=false;
 function message(text,error=false) { $('message').textContent=text; $('message').className=error?'error':''; }
 async function api(path,options={}) {
   const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(csrfToken?{'X-CSRF-Token':csrfToken}:{}),...options.headers}});
@@ -116,13 +116,25 @@ async function initialize() {
     $('filter-category').value=selected;resetForm();await refresh();$('entry-fields').disabled=false;message('');
   } catch(error) { message('Unable to load finance tracker. '+error.message,true);$('retry').hidden=false; }
 }
+function setAuthMode(createAccount) {
+  signupMode=createAccount;
+  $('auth-title').textContent=createAccount?'Create your account.':'Welcome back.';
+  $('auth-subtitle').textContent=createAccount?'Set up your private ledger in one step.':'Sign in to access your financial records.';
+  $('login-button').textContent=createAccount?'Create account':'Sign in';
+  $('password').minLength=createAccount?15:0;
+  $('password').autocomplete=createAccount?'new-password':'current-password';
+  $('signup-confirm').hidden=!createAccount;
+  $('signup-confirm-password').disabled=!createAccount;
+  $('signup-confirm-password').required=createAccount;
+  $('setup-note').hidden=!createAccount;
+}
 function showLogin(text='') {
   authenticated=false;csrfToken=null;requestVersion++;clearTimeout(searchTimer);
   records=[];total=0;editingId=null;render();form.reset();
   for(const name of ['income','expenses','balance']) {$(name).textContent='\u2014';$('filtered-'+name).textContent='\u2014';}
   $('finance-view').hidden=true;$('account-controls').hidden=true;$('login-view').hidden=false;
   $('delete-dialog').close();$('password-dialog').close();$('password-form').reset();
-  $('login-message').textContent=text;$('password').value='';
+  $('login-message').textContent=text;$('password').value='';$('signup-confirm-password').value='';
 }
 async function signedIn(status) {
   authenticated=true;csrfToken=status.csrfToken;page=1;
@@ -131,8 +143,15 @@ async function signedIn(status) {
 }
 $('login-form').addEventListener('submit',async event=>{
   event.preventDefault();$('login-button').disabled=true;$('login-message').textContent='';
-  try {const result=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username:$('username').value,password:$('password').value})});$('password').value='';await signedIn(result);}
-  catch(error){$('login-message').textContent=error.message;}
+  try {
+    if(signupMode && $('password').value!==$('signup-confirm-password').value) throw new Error('Passwords do not match.');
+    const result=await api(signupMode?'/api/auth/signup':'/api/auth/login',{method:'POST',body:JSON.stringify({username:$('username').value,password:$('password').value,...(signupMode?{confirmPassword:$('signup-confirm-password').value}:{})})});
+    $('password').value='';$('signup-confirm-password').value='';setAuthMode(false);await signedIn(result);
+  }
+  catch(error){
+    if(signupMode) {try{const status=await api('/api/auth/status');if(status.configured)setAuthMode(false);}catch{}}
+    $('login-message').textContent=error.message;
+  }
   finally{$('login-button').disabled=false;}
 });
 $('logout').addEventListener('click',async()=>{
@@ -175,7 +194,7 @@ $('export').addEventListener('click',async()=>{
   } catch(error){message(error.message,true);}finally{$('export').disabled=false;}
 });
 try {
-  const status=await api('/api/auth/status');$('setup-note').hidden=status.configured;
+  const status=await api('/api/auth/status');setAuthMode(!status.configured);
   if(status.authenticated) await signedIn(status);else showLogin();
 } catch(error){showLogin('Unable to connect. Refresh the page to retry.');}
 finally { $('login-button').disabled=false; }

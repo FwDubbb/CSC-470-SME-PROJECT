@@ -2,7 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { openDatabase, validateTransaction } from './db.js';
-import { initializeAuth, sessionFor, startSession, clearCookie, verifyPassword, hashPassword, csrfMatches } from './auth.js';
+import { initializeAuth, sessionFor, startSession, clearCookie, verifyPassword, hashPassword, csrfMatches, setOwner } from './auth.js';
 import { databasePath, lockDatabase } from './storage.js';
 import { filters, summary, listTransactions, csv } from './queries.js';
 
@@ -17,7 +17,7 @@ async function readBody(req) {
 }
 export function createApp(filename,{secureCookies=process.env.NODE_ENV==='production',appOrigin=process.env.APP_ORIGIN}={}) {
   const db=openDatabase(filename);initializeAuth(db);
-  let activePasswordChecks=0;
+  let activePasswordChecks=0, signupBusy=false;
   const server=createServer(async(req,res)=>{
     res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');
@@ -37,6 +37,19 @@ export function createApp(filename,{secureCookies=process.env.NODE_ENV==='produc
       if(!url.pathname.startsWith('/api/')) return respond(res,404,{error:'Not found.'});
       const session=sessionFor(req,db);
       if(req.method==='GET' && url.pathname==='/api/auth/status') return respond(res,200,{configured:!!db.prepare('SELECT id FROM users').get(),authenticated:!!session,username:session?.username,csrfToken:session?.csrf_token});
+      if(req.method==='POST' && url.pathname==='/api/auth/signup') {
+        if(db.prepare('SELECT id FROM users').get()) return respond(res,409,{error:'An owner account already exists. Please sign in.'});
+        if(secureCookies || !['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) return respond(res,403,{error:'First-time browser setup is available locally. Use account:setup on the server for hosted installations.'});
+        if(signupBusy) return respond(res,409,{error:'Account creation is already in progress. Please retry.'});
+        signupBusy=true;
+        try {
+          const body=await readBody(req);
+          if(!body || body.password!==body.confirmPassword) throw new Error('Passwords do not match.');
+          await setOwner(db,body.username,body.password);
+          const csrfToken=startSession(db,res,secureCookies);
+          return respond(res,201,{username:body.username,csrfToken});
+        } finally {signupBusy=false;}
+      }
       if(req.method==='POST' && url.pathname==='/api/auth/login') {
         const address=req.socket.remoteAddress || 'local',now=Date.now();
         db.prepare('DELETE FROM login_limits WHERE reset_at<=?').run(now);

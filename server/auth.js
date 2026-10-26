@@ -40,6 +40,7 @@ export async function setOwner(db, username, password, reset = false) {
   const passwordHash = await hashPassword(password);
   db.exec('BEGIN IMMEDIATE');
   try {
+    if (!reset && db.prepare('SELECT id FROM users').get()) throw new Error('An owner already exists. Sign in instead.');
     db.prepare('INSERT INTO users(id,username,password_hash) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username,password_hash=excluded.password_hash').run(username,passwordHash);
     db.exec('DELETE FROM sessions; DELETE FROM login_limits; COMMIT');
   } catch(error) {db.exec('ROLLBACK');throw error;}
