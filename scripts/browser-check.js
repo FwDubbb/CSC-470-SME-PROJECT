@@ -72,6 +72,9 @@ try {
   assert.ok(await evaluate('document.documentElement.scrollWidth<=window.innerWidth'), 'Mobile viewport has horizontal page overflow');
   const mobile=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});writeFileSync(join(artifacts,'mobile.png'),Buffer.from(mobile.data,'base64'));
   await evaluate("document.getElementById('logout').click()");await wait("!document.getElementById('login-view').hidden && document.getElementById('finance-view').hidden");
+  const loginMobile=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});writeFileSync(join(artifacts,'login-mobile.png'),Buffer.from(loginMobile.data,'base64'));
+  await send('Emulation.setDeviceMetricsOverride',{width:1365,height:900,deviceScaleFactor:1,mobile:false});
+  const loginDesktop=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});writeFileSync(join(artifacts,'login-desktop.png'),Buffer.from(loginDesktop.data,'base64'));
   assert.equal(await evaluate("document.querySelectorAll('#transactions tr').length"),0);
   assert.equal(await evaluate("document.querySelectorAll('#inventory-items tr').length"),0);
   await evaluate("document.getElementById('username').value='browser-owner';document.getElementById('password').value='browser-only-long-passphrase';document.getElementById('login-form').requestSubmit()");

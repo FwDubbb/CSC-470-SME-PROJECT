@@ -22,7 +22,7 @@ function resetForm() {
   editingId=null; form.reset();
   const today=new Date();
   $('date').value=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-  fillCategories(); $('form-title').textContent='Add a transaction'; $('save').textContent='Add transaction'; $('cancel').hidden=true;
+  fillCategories(); $('form-title').textContent='New entry'; $('save').textContent='Add transaction'; $('cancel').hidden=true;
 }
 function cell(text,className='') { const el=document.createElement('td');el.textContent=text;el.className=className;return el; }
 function render() {
@@ -71,11 +71,11 @@ function edit(record) {
   if(mutating) return;
   editingId=record.id;form.elements.type.value=record.type;fillCategories();
   $('amount').value=(record.amount_cents/100).toFixed(2);$('date').value=record.date;$('category').value=record.category_id;$('description').value=record.description;
-  $('form-title').textContent='Edit transaction';$('save').textContent='Save changes';$('cancel').hidden=false;
+  $('form-title').textContent='Update entry';$('save').textContent='Save changes';$('cancel').hidden=false;
   form.scrollIntoView({behavior:'instant',block:'center'});$('amount').focus();
 }
 function duplicate(record) {
-  edit(record);editingId=null;$('form-title').textContent='Duplicate transaction';$('save').textContent='Add duplicate';
+  edit(record);editingId=null;$('form-title').textContent='Make it another';$('save').textContent='Add duplicate';
   message('Review the date and details, then save as a new transaction.');
 }
 function busy(value) { mutating=value;$('entry-fields').disabled=value;render(); }
@@ -121,8 +121,8 @@ async function initialize() {
 }
 function setAuthMode(createAccount) {
   signupMode=createAccount;
-  $('auth-title').textContent=createAccount?'Create your account.':'Welcome back.';
-  $('auth-subtitle').textContent=createAccount?'Set up your private ledger in one step.':'Sign in to access your financial records.';
+  $('auth-title').textContent=createAccount?'A fresh start, right here.':'Back to business.';
+  $('auth-subtitle').textContent=createAccount?'Create your account and make yourself at home.':'Sign in and pick up where you left off.';
   $('login-button').textContent=createAccount?'Create account':'Sign in';
   $('password').minLength=createAccount?15:0;
   $('password').autocomplete=createAccount?'new-password':'current-password';
@@ -133,6 +133,7 @@ function setAuthMode(createAccount) {
 }
 function showLogin(text='') {
   inventory.clear();
+  document.body.classList.remove('is-authenticated');$('auth-layout').hidden=false;
   authenticated=false;csrfToken=null;requestVersion++;clearTimeout(searchTimer);
   records=[];total=0;editingId=null;render();form.reset();
   for(const name of ['income','expenses','balance']) {$(name).textContent='\u2014';$('filtered-'+name).textContent='\u2014';}
@@ -141,7 +142,9 @@ function showLogin(text='') {
   $('login-message').textContent=text;$('password').value='';$('signup-confirm-password').value='';
 }
 async function signedIn(status) {
+  document.body.classList.add('is-authenticated');$('auth-layout').hidden=true;
   authenticated=true;csrfToken=status.csrfToken;page=1;
+  document.querySelector('.owner-avatar').textContent=status.username.slice(0,1).toUpperCase();
   $('login-view').hidden=true;$('finance-view').hidden=false;$('account-controls').hidden=false;$('owner-name').textContent=status.username;
   await initialize();
 }
@@ -202,3 +205,6 @@ try {
   if(status.authenticated) await signedIn(status);else showLogin();
 } catch(error){showLogin('Unable to connect. Refresh the page to retry.');}
 finally { $('login-button').disabled=false; }
+
+$('today-label').textContent=new Intl.DateTimeFormat('en-US',{month:'long',day:'numeric',year:'numeric'}).format(new Date());
+for(const link of document.querySelectorAll('.section-nav a')) link.addEventListener('click',()=>{for(const item of document.querySelectorAll('.section-nav a'))item.classList.toggle('active',item===link);});

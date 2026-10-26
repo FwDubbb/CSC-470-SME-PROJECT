@@ -1,6 +1,6 @@
-﻿# Ledger — Simple Business Finance Tracker
+﻿# Tallyroom — Simple Business Finance Tracker
 
-A small, single-owner class project with login, income/expense CRUD, predefined categories, date/category/type filters, description search, all-time and filtered totals, CSV export, pagination, duplication, basic inventory management, and database backup/restore.
+Tallyroom is a small, single-owner class project with login, income/expense CRUD, predefined categories, date/category/type filters, description search, all-time and filtered totals, CSV export, pagination, duplication, basic inventory management, and database backup/restore.
 
 Repository: https://github.com/FwDubbb/CSC-470-SME-PROJECT
 
