@@ -1,4 +1,3 @@
-import { initializeInventory } from '../server/inventory.js';
 import { pathToFileURL } from 'node:url';
 ﻿import { DatabaseSync,backup } from 'node:sqlite';
 import { mkdirSync, existsSync, renameSync, rmSync } from 'node:fs';
@@ -29,7 +28,7 @@ export async function restoreBackup(source,target,priorBackup) {
   try {
     await makeBackup(source,staged);
     const restored=new DatabaseSync(staged);
-    try{initializeAuth(restored);initializeInventory(restored);restored.exec('DELETE FROM sessions; DELETE FROM login_limits; PRAGMA journal_mode=DELETE;');}finally{restored.close();}
+    try{initializeAuth(restored);restored.exec('DELETE FROM sessions; DELETE FROM login_limits; PRAGMA journal_mode=DELETE;');}finally{restored.close();}
     if(existsSync(target)) {
       await makeBackup(target,priorBackup);
       const current=new DatabaseSync(target);try{current.exec('PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE;');}finally{current.close();}

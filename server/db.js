@@ -1,4 +1,6 @@
-import { initializeInventory } from './inventory.js';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { initializeSchema } from './schema.js';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -6,24 +8,22 @@ import { dirname } from 'node:path';
 export function openDatabase(filename) {
   if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true });
   const db = new DatabaseSync(filename);
-  db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;
-    CREATE TABLE IF NOT EXISTS categories (
-      id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
-      type TEXT NOT NULL CHECK(type IN ('income','expense')), UNIQUE(id,type)
-    );
-    CREATE TABLE IF NOT EXISTS transactions (
-      id INTEGER PRIMARY KEY,
-      type TEXT NOT NULL CHECK(type IN ('income','expense')),
-      amount_cents INTEGER NOT NULL CHECK(amount_cents BETWEEN 1 AND 999999999),
-      date TEXT NOT NULL, category_id INTEGER NOT NULL,
-      description TEXT NOT NULL DEFAULT '' CHECK(length(description)<=250),
-      FOREIGN KEY(category_id,type) REFERENCES categories(id,type)
-    );`);
+  db.exec('PRAGMA journal_mode=WAL');
+  try {
+    const oldUsers=db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
+    const oldTransactions=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'").get();
+    const needsMigration=(oldUsers && /CHECK\s*\(\s*id\s*=\s*1\s*\)/i.test(oldUsers.sql)) || (oldTransactions && !db.prepare('PRAGMA table_info(transactions)').all().some(column=>column.name==='user_id'));
+    if(filename!==':memory:' && needsMigration) {
+      const folder=join(dirname(filename),'backups');mkdirSync(folder,{recursive:true});
+      db.prepare('VACUUM INTO ?').run(join(folder,'before-accounts-'+Date.now()+'-'+randomUUID()+'.sqlite'));
+    }
+    initializeSchema(db);
+  }catch(error){db.close();throw error;}
+
   const seed = db.prepare('INSERT OR IGNORE INTO categories(name,type) VALUES (?,?)');
   for (const [type, names] of Object.entries({ income: ['Sales','Services','Other Income'], expense: ['Rent','Utilities','Supplies','Transportation','Other Expenses'] })) {
     for (const name of names) seed.run(name,type);
   }
-  initializeInventory(db);
   return db;
 }
 

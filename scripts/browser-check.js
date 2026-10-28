@@ -85,8 +85,25 @@ try {
   await evaluate("document.querySelector('#inventory-items .delete').click()");await wait("document.getElementById('inventory-delete-dialog').open");
   await evaluate("document.querySelector('#inventory-delete-dialog button[value=delete]').click()");await wait("document.querySelectorAll('#inventory-items tr').length===0");
   assert.equal(await evaluate("document.getElementById('inventory-message').classList.contains('error')"),false);
+  await evaluate("document.getElementById('logout').click()");await wait("!document.getElementById('login-view').hidden");
+  await evaluate("document.getElementById('auth-signup').click();document.getElementById('username').value='second-person';document.getElementById('password').value='second-person-long-passphrase';document.getElementById('signup-confirm-password').value='second-person-long-passphrase';document.getElementById('login-form').requestSubmit()");
+  await wait("!document.getElementById('finance-view').hidden && !document.getElementById('entry-fields').disabled && document.getElementById('owner-name').textContent==='second-person'");
+  assert.equal(await evaluate("document.getElementById('balance').textContent"),'$0.00');
+  assert.equal(await evaluate("document.querySelectorAll('#transactions tr').length"),0);
+  assert.equal(await evaluate("document.querySelectorAll('#inventory-items tr').length"),0);
+  await evaluate("document.getElementById('amount').value='75.00';document.getElementById('description').value='Second person private income';document.getElementById('transaction-form').requestSubmit()");
+  await wait("document.getElementById('balance').textContent==='$75.00'");
+  await evaluate("document.getElementById('item-name').value='Second person stock';document.getElementById('item-quantity').value='4';document.getElementById('item-price').value='5.00';document.getElementById('inventory-form').requestSubmit()");
+  await wait("document.querySelectorAll('#inventory-items tr').length===1 && !document.getElementById('inventory-fields').disabled");
+  await evaluate("document.getElementById('logout').click()");await wait("!document.getElementById('login-view').hidden");
+  await evaluate("document.getElementById('username').value='browser-owner';document.getElementById('password').value='browser-only-long-passphrase';document.getElementById('login-form').requestSubmit()");
+  await wait("!document.getElementById('finance-view').hidden && !document.getElementById('entry-fields').disabled && document.getElementById('owner-name').textContent==='browser-owner'");
+  assert.equal(await evaluate("document.getElementById('balance').textContent"),'$150.25');
+  assert.equal(await evaluate("document.querySelectorAll('#transactions tr').length"),1);
+  assert.equal(await evaluate("document.querySelectorAll('#inventory-items tr').length"),0);
+  assert.ok(!(await evaluate("document.getElementById('transactions').textContent")).includes('Second person'));
   assert.deepEqual(errors,[]);
-  console.log('Browser checks passed: first-run signup, automatic login, subsequent sign-in, income/expense entry, edit, duplicate review, filtering, totals, delete confirmation, mobile layout, inventory CRUD/search/reload, and logout. Screenshots: artifacts/desktop.png and artifacts/mobile.png');
+  console.log('Browser checks passed: first-run signup, automatic login, subsequent sign-in, income/expense entry, edit, duplicate review, filtering, totals, delete confirmation, mobile layout, inventory CRUD/search/reload, logout, and separate-account data isolation. Screenshots: artifacts/desktop.png and artifacts/mobile.png');
 } finally {
   try{await closeBrowser?.();await new Promise(r=>setTimeout(r,500));}catch{}
   socket?.close();

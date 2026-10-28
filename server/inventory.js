@@ -1,11 +1,3 @@
-﻿export function initializeInventory(db) {
-  db.exec(`CREATE TABLE IF NOT EXISTS inventory (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL COLLATE NOCASE UNIQUE CHECK(length(name) BETWEEN 1 AND 100),
-    quantity INTEGER NOT NULL CHECK(typeof(quantity)='integer' AND quantity BETWEEN 0 AND 1000000),
-    unit_price_cents INTEGER NOT NULL CHECK(typeof(unit_price_cents)='integer' AND unit_price_cents BETWEEN 0 AND 999999999)
-  )`);
-}
 export function validateInventory(body) {
   if(!body || typeof body!=='object' || Array.isArray(body)) throw new Error('An inventory item is required.');
   if(typeof body.name!=='string' || !body.name.trim() || body.name.trim().length>100) throw new Error('Item name must be 1-100 characters.');

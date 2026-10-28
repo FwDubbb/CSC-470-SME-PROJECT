@@ -3,7 +3,7 @@ import { validateInventory } from './inventory.js';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { openDatabase, validateTransaction } from './db.js';
-import { initializeAuth, sessionFor, startSession, clearCookie, verifyPassword, hashPassword, csrfMatches, setOwner } from './auth.js';
+import { initializeAuth, sessionFor, startSession, clearCookie, verifyPassword, hashPassword, csrfMatches, createUser } from './auth.js';
 import { databasePath, lockDatabase } from './storage.js';
 import { filters, summary, listTransactions, csv } from './queries.js';
 
@@ -18,7 +18,7 @@ async function readBody(req) {
 }
 export function createApp(filename,{secureCookies=process.env.NODE_ENV==='production',appOrigin=process.env.APP_ORIGIN}={}) {
   const db=openDatabase(filename);initializeAuth(db);
-  let activePasswordChecks=0, signupBusy=false;
+  let activePasswordChecks=0;
   const server=createServer(async(req,res)=>{
     res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');
@@ -37,19 +37,20 @@ export function createApp(filename,{secureCookies=process.env.NODE_ENV==='produc
       }
       if(!url.pathname.startsWith('/api/')) return respond(res,404,{error:'Not found.'});
       const session=sessionFor(req,db);
-      if(req.method==='GET' && url.pathname==='/api/auth/status') return respond(res,200,{configured:!!db.prepare('SELECT id FROM users').get(),authenticated:!!session,username:session?.username,csrfToken:session?.csrf_token});
+      if(req.method==='GET' && url.pathname==='/api/auth/status') return respond(res,200,{configured:!!db.prepare("SELECT id FROM users WHERE password_hash<>'!unclaimed'").get(),signupAllowed:true,authenticated:!!session,username:session?.username,csrfToken:session?.csrf_token});
       if(req.method==='POST' && url.pathname==='/api/auth/signup') {
-        if(db.prepare('SELECT id FROM users').get()) return respond(res,409,{error:'An owner account already exists. Please sign in.'});
-        if(secureCookies || !['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) return respond(res,403,{error:'First-time browser setup is available locally. Use account:setup on the server for hosted installations.'});
-        if(signupBusy) return respond(res,409,{error:'Account creation is already in progress. Please retry.'});
-        signupBusy=true;
-        try {
-          const body=await readBody(req);
-          if(!body || body.password!==body.confirmPassword) throw new Error('Passwords do not match.');
-          await setOwner(db,body.username,body.password);
-          const csrfToken=startSession(db,res,secureCookies);
-          return respond(res,201,{username:body.username,csrfToken});
-        } finally {signupBusy=false;}
+        const address='signup:'+(req.socket.remoteAddress || 'local'),now=Date.now();
+        db.prepare('DELETE FROM login_limits WHERE reset_at<=?').run(now);
+        const limit=db.prepare('SELECT * FROM login_limits WHERE address=?').get(address);
+        if(limit?.attempts>=10) {res.setHeader('Retry-After',Math.ceil((limit.reset_at-now)/1000));return respond(res,429,{error:'Too many signup attempts. Try again later.'});}
+        if(activePasswordChecks>=2) return respond(res,429,{error:'Account service is busy. Please retry shortly.'});
+        db.prepare('INSERT INTO login_limits VALUES (?,1,?) ON CONFLICT(address) DO UPDATE SET attempts=attempts+1').run(address,now+60*60*1000);
+        const body=await readBody(req);
+        if(!body || body.password!==body.confirmPassword) throw new Error('Passwords do not match.');
+        activePasswordChecks++;
+        let user;try{user=await createUser(db,body.username,body.password);}finally{activePasswordChecks--;}
+        const csrfToken=startSession(db,res,secureCookies,user.id,session);
+        return respond(res,201,{username:user.username,csrfToken});
       }
       if(req.method==='POST' && url.pathname==='/api/auth/login') {
         const address=req.socket.remoteAddress || 'local',now=Date.now();
@@ -60,13 +61,13 @@ export function createApp(filename,{secureCookies=process.env.NODE_ENV==='produc
         const body=await readBody(req);
         if(!body || typeof body.username!=='string' || typeof body.password!=='string' || body.username.length>40 || body.password.length>128) return respond(res,400,{error:'Enter a valid username and password.'});
         db.prepare('INSERT INTO login_limits VALUES (?,1,?) ON CONFLICT(address) DO UPDATE SET attempts=attempts+1').run(address,now+15*60*1000);
-        const user=db.prepare('SELECT * FROM users WHERE username=?').get(body.username);
+        const user=db.prepare('SELECT * FROM users WHERE username=? COLLATE NOCASE').get(body.username);
         activePasswordChecks++;
         let valid;
         try {valid=await verifyPassword(body.password,user?.password_hash);} finally {activePasswordChecks--;}
-        if(!valid || db.prepare('SELECT password_hash FROM users WHERE id=1').get()?.password_hash!==user?.password_hash) return respond(res,401,{error:'Invalid username or password.'});
+        if(!valid || db.prepare('SELECT password_hash FROM users WHERE id=?').get(user?.id || -1)?.password_hash!==user?.password_hash) return respond(res,401,{error:'Invalid username or password.'});
         db.prepare('DELETE FROM login_limits WHERE address=?').run(address);
-        const csrfToken=startSession(db,res,secureCookies,session);
+        const csrfToken=startSession(db,res,secureCookies,user.id,session);
         return respond(res,200,{username:user.username,csrfToken});
       }
       if(!session) return respond(res,401,{error:'Please sign in to continue.'});
@@ -85,36 +86,36 @@ export function createApp(filename,{secureCookies=process.env.NODE_ENV==='produc
         activePasswordChecks++;
         let passwordHash,verifiedHash;
         try {
-          const user=db.prepare('SELECT * FROM users WHERE id=1').get();
+          const user=db.prepare('SELECT * FROM users WHERE id=?').get(session.user_id);
           verifiedHash=user.password_hash;
           if(!await verifyPassword(body.currentPassword,user.password_hash)) return respond(res,400,{error:'Current password is incorrect.'});
           if(body.currentPassword===body.newPassword) throw new Error('Choose a different new password.');
           passwordHash=await hashPassword(body.newPassword);
         } finally {activePasswordChecks--;}
-        if(db.prepare('SELECT password_hash FROM users WHERE id=1').get()?.password_hash!==verifiedHash || !db.prepare('SELECT token_hash FROM sessions WHERE token_hash=?').get(session.token_hash)) return respond(res,409,{error:'Credentials changed during this request. Sign in again.'});
+        if(db.prepare('SELECT password_hash FROM users WHERE id=?').get(session.user_id)?.password_hash!==verifiedHash || !db.prepare('SELECT token_hash FROM sessions WHERE token_hash=?').get(session.token_hash)) return respond(res,409,{error:'Credentials changed during this request. Sign in again.'});
         db.exec('BEGIN IMMEDIATE');
-        try {db.prepare('UPDATE users SET password_hash=? WHERE id=1').run(passwordHash);db.exec('DELETE FROM sessions; DELETE FROM login_limits; COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
+        try {db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(passwordHash,session.user_id);db.prepare('DELETE FROM sessions WHERE user_id=?').run(session.user_id);db.prepare('DELETE FROM login_limits WHERE address=?').run(address);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
         clearCookie(res,secureCookies);return respond(res,200,{message:'Password changed. Sign in again on all devices.'});
       }
-      if(req.method==='GET' && url.pathname==='/api/inventory') return respond(res,200,db.prepare('SELECT * FROM inventory ORDER BY name COLLATE NOCASE,id').all());
+      if(req.method==='GET' && url.pathname==='/api/inventory') return respond(res,200,db.prepare('SELECT * FROM inventory WHERE user_id=? ORDER BY name COLLATE NOCASE,id').all(session.user_id));
       const inventoryMatch=url.pathname.match(/^\/api\/inventory\/([1-9]\d*)$/);
       if((req.method==='POST' && url.pathname==='/api/inventory') || (req.method==='PUT' && inventoryMatch)) {
         const item=validateInventory(await readBody(req));
         const id=inventoryMatch?Number(inventoryMatch[1]):null;
-        if(id && !db.prepare('SELECT id FROM inventory WHERE id=?').get(id)) return respond(res,404,{error:'Inventory item not found.'});
-        const duplicate=db.prepare('SELECT id FROM inventory WHERE name=? COLLATE NOCASE').get(item.name);
+        if(id && !db.prepare('SELECT id FROM inventory WHERE id=? AND user_id=?').get(id,session.user_id)) return respond(res,404,{error:'Inventory item not found.'});
+        const duplicate=db.prepare('SELECT id FROM inventory WHERE name=? COLLATE NOCASE AND user_id=?').get(item.name,session.user_id);
         if(duplicate && duplicate.id!==id) return respond(res,409,{error:'An item with this name already exists. Edit its quantity instead.'});
-        if(id) {db.prepare('UPDATE inventory SET name=?,quantity=?,unit_price_cents=? WHERE id=?').run(item.name,item.quantity,item.unit_price_cents,id);return respond(res,200,{id,...item});}
-        const result=db.prepare('INSERT INTO inventory(name,quantity,unit_price_cents) VALUES (?,?,?)').run(item.name,item.quantity,item.unit_price_cents);
+        if(id) {db.prepare('UPDATE inventory SET name=?,quantity=?,unit_price_cents=? WHERE id=? AND user_id=?').run(item.name,item.quantity,item.unit_price_cents,id,session.user_id);return respond(res,200,{id,...item});}
+        const result=db.prepare('INSERT INTO inventory(user_id,name,quantity,unit_price_cents) VALUES (?,?,?,?)').run(session.user_id,item.name,item.quantity,item.unit_price_cents);
         return respond(res,201,{id:Number(result.lastInsertRowid),...item});
       }
       if(req.method==='DELETE' && inventoryMatch) {
-        const result=db.prepare('DELETE FROM inventory WHERE id=?').run(Number(inventoryMatch[1]));return respond(res,result.changes?200:404,result.changes?{message:'Inventory item deleted.'}:{error:'Inventory item not found.'});
+        const result=db.prepare('DELETE FROM inventory WHERE id=? AND user_id=?').run(Number(inventoryMatch[1]),session.user_id);return respond(res,result.changes?200:404,result.changes?{message:'Inventory item deleted.'}:{error:'Inventory item not found.'});
       }
       if(req.method==='GET' && url.pathname==='/api/categories') return respond(res,200,db.prepare('SELECT * FROM categories ORDER BY id').all());
       if(req.method==='GET' && ['/api/summary','/api/transactions','/api/export'].includes(url.pathname)) {
-        const {where,values}=filters(url.searchParams);
-        if(url.pathname==='/api/summary') return respond(res,200,{allTime:summary(db),filtered:summary(db,where,values)});
+        const {where,values}=filters(url.searchParams,session.user_id);
+        if(url.pathname==='/api/summary') return respond(res,200,{allTime:summary(db,'WHERE t.user_id=?',[session.user_id]),filtered:summary(db,where,values)});
         if(url.pathname==='/api/export') {
           const content=csv(listTransactions(db,where,values));res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="ledger-transactions.csv"'});return res.end(content);
         }
@@ -128,19 +129,19 @@ export function createApp(filename,{secureCookies=process.env.NODE_ENV==='produc
       if((req.method==='POST' && url.pathname==='/api/transactions') || (req.method==='PUT' && match)) {
         const t=validateTransaction(await readBody(req),db);
         if(match) {
-          const result=db.prepare('UPDATE transactions SET type=?,amount_cents=?,date=?,category_id=?,description=? WHERE id=?').run(t.type,t.amount_cents,t.date,t.category_id,t.description,Number(match[1]));
+          const result=db.prepare('UPDATE transactions SET type=?,amount_cents=?,date=?,category_id=?,description=? WHERE id=? AND user_id=?').run(t.type,t.amount_cents,t.date,t.category_id,t.description,Number(match[1]),session.user_id);
           return respond(res,result.changes?200:404,result.changes?{id:Number(match[1]),...t}:{error:'Transaction not found.'});
         }
-        const result=db.prepare('INSERT INTO transactions(type,amount_cents,date,category_id,description) VALUES (?,?,?,?,?)').run(t.type,t.amount_cents,t.date,t.category_id,t.description);
+        const result=db.prepare('INSERT INTO transactions(user_id,type,amount_cents,date,category_id,description) VALUES (?,?,?,?,?,?)').run(session.user_id,t.type,t.amount_cents,t.date,t.category_id,t.description);
         return respond(res,201,{id:Number(result.lastInsertRowid),...t});
       }
       if(req.method==='DELETE' && match) {
-        const result=db.prepare('DELETE FROM transactions WHERE id=?').run(Number(match[1]));return respond(res,result.changes?200:404,result.changes?{message:'Transaction deleted.'}:{error:'Transaction not found.'});
+        const result=db.prepare('DELETE FROM transactions WHERE id=? AND user_id=?').run(Number(match[1]),session.user_id);return respond(res,result.changes?200:404,result.changes?{message:'Transaction deleted.'}:{error:'Transaction not found.'});
       }
       respond(res,404,{error:'Not found.'});
     } catch(error) {
       if(error.code) {console.error('Request failed:',error.code);respond(res,500,{error:'Unable to complete request. Please retry.'});}
-      else respond(res,400,{error:error.message || 'Invalid request.'});
+      else respond(res,error.status || 400,{error:error.message || 'Invalid request.'});
     }
   });
   server.requestTimeout=15000;server.headersTimeout=10000;

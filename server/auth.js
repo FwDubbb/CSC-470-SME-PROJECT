@@ -1,3 +1,4 @@
+import { initializeSchema, pendingUsername } from './schema.js';
 ﻿import { randomBytes, scrypt, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 const derive = promisify(scrypt);
@@ -21,29 +22,38 @@ export async function verifyPassword(password, stored) {
   const actual = await derive(password, salt, 64, parameters);
   return expected.length === actual.length && timingSafeEqual(actual, expected) && valid;
 }
-export function initializeAuth(db) {
-  db.exec(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY CHECK(id=1), username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS sessions (
-    token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
-    csrf_token TEXT NOT NULL, created_at INTEGER NOT NULL, last_seen INTEGER NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS login_limits (
-    address TEXT PRIMARY KEY, attempts INTEGER NOT NULL, reset_at INTEGER NOT NULL
-  );`);
+export function initializeAuth(db) {initializeSchema(db);}
+function validateUsername(username) {
+  if(typeof username!=='string' || !/^[a-zA-Z0-9_.-]{3,40}$/.test(username)) throw new Error('Username must be 3-40 letters, digits, dots, underscores, or hyphens.');
 }
-export async function setOwner(db, username, password, reset = false) {
-  if (typeof username !== 'string' || !/^[a-zA-Z0-9_.-]{3,40}$/.test(username)) throw new Error('Username must be 3–40 letters, digits, dots, underscores, or hyphens.');
-  if (!reset && db.prepare('SELECT id FROM users').get()) throw new Error('An owner already exists. Use npm run account:reset to reset credentials.');
-  const passwordHash = await hashPassword(password);
+export async function createUser(db,username,password) {
+  validateUsername(username);
+  if(db.prepare('SELECT id FROM users WHERE username=? COLLATE NOCASE').get(username)) {const error=new Error('That username is already taken. Choose another or sign in.');error.status=409;throw error;}
+  const passwordHash=await hashPassword(password);
   db.exec('BEGIN IMMEDIATE');
   try {
-    if (!reset && db.prepare('SELECT id FROM users').get()) throw new Error('An owner already exists. Sign in instead.');
-    db.prepare('INSERT INTO users(id,username,password_hash) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username,password_hash=excluded.password_hash').run(username,passwordHash);
-    db.exec('DELETE FROM sessions; DELETE FROM login_limits; COMMIT');
-  } catch(error) {db.exec('ROLLBACK');throw error;}
+    if(db.prepare('SELECT id FROM users WHERE username=? COLLATE NOCASE').get(username)) {const error=new Error('That username is already taken.');error.status=409;throw error;}
+    const pending=db.prepare('SELECT id FROM users WHERE username=? AND password_hash=?').get(pendingUsername,'!unclaimed');
+    let id;
+    if(pending) {id=pending.id;db.prepare('UPDATE users SET username=?,password_hash=? WHERE id=?').run(username,passwordHash,id);}
+    else id=Number(db.prepare('INSERT INTO users(username,password_hash) VALUES (?,?)').run(username,passwordHash).lastInsertRowid);
+    db.exec('COMMIT');return {id,username};
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+export async function resetUser(db,username,password) {
+  validateUsername(username);
+  const user=db.prepare('SELECT id FROM users WHERE username=? COLLATE NOCASE').get(username);
+  if(!user) throw new Error('Account not found. Enter the existing username to reset its password.');
+  const passwordHash=await hashPassword(password);
+  db.exec('BEGIN IMMEDIATE');
+  try{db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(passwordHash,user.id);db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id);db.exec('DELETE FROM login_limits; COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
+  return user;
+}
+// Kept for the optional first-account CLI and older integration helpers.
+export async function setOwner(db,username,password,reset=false) {
+  if(reset) return resetUser(db,username,password);
+  if(db.prepare('SELECT id FROM users WHERE username<>?').get(pendingUsername)) throw new Error('An account already exists. Use browser signup to add another account.');
+  return createUser(db,username,password);
 }
 export function sessionFor(req, db) {
   const token = req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith('ledger_session='))?.slice(15);
@@ -56,12 +66,12 @@ export function sessionFor(req, db) {
   db.prepare('UPDATE sessions SET last_seen=? WHERE token_hash=?').run(now,hash);
   return session;
 }
-export function startSession(db, res, secure, previous) {
+export function startSession(db, res, secure, userId, previous) {
   const now=Date.now();
   db.prepare('DELETE FROM sessions WHERE created_at<? OR last_seen<?').run(now-12*60*60*1000,now-30*60*1000);
   if(previous) db.prepare('DELETE FROM sessions WHERE token_hash=?').run(previous.token_hash);
   const token=randomBytes(32).toString('hex'), csrf=randomBytes(32).toString('hex');
-  db.prepare('INSERT INTO sessions VALUES (?,1,?,?,?)').run(hashToken(token),csrf,now,now);
+  db.prepare('INSERT INTO sessions VALUES (?,?,?,?,?)').run(hashToken(token),userId,csrf,now,now);
   res.setHeader('Set-Cookie',`ledger_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${secure?'; Secure':''}`);
   return csrf;
 }

@@ -3,11 +3,14 @@ import { createInventory } from './inventory.js';
 const form = $('transaction-form');
 const money = (cents) => new Intl.NumberFormat('en-US', {style:'currency',currency:'USD'}).format(cents/100);
 let categories=[], records=[], editingId=null, requestVersion=0, mutating=false;
+let authGeneration=0;
 let csrfToken=null, page=1, total=0, authenticated=false, signupMode=false;
 function message(text,error=false) { $('message').textContent=text; $('message').className=error?'error':''; }
 async function api(path,options={}) {
+  const generation=authGeneration;
   const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(csrfToken?{'X-CSRF-Token':csrfToken}:{}),...options.headers}});
   const body=await response.json();
+  if(generation!==authGeneration) throw new Error('Account changed. Please retry.');
   if(response.status===401 && !path.includes('/auth/login')) showLogin('Your session ended. Please sign in again.');
   if(!response.ok) throw new Error(body.error || 'Something went wrong. Please retry.');
   return body;
@@ -121,6 +124,8 @@ async function initialize() {
 }
 function setAuthMode(createAccount) {
   signupMode=createAccount;
+  $('auth-signin').setAttribute('aria-pressed',String(!createAccount));
+  $('auth-signup').setAttribute('aria-pressed',String(createAccount));
   $('auth-title').textContent=createAccount?'A fresh start, right here.':'Back to business.';
   $('auth-subtitle').textContent=createAccount?'Create your account and make yourself at home.':'Sign in and pick up where you left off.';
   $('login-button').textContent=createAccount?'Create account':'Sign in';
@@ -132,6 +137,8 @@ function setAuthMode(createAccount) {
   $('setup-note').hidden=!createAccount;
 }
 function showLogin(text='') {
+  authGeneration++;
+  for(const id of ['filter-type','filter-category','filter-start','filter-end','filter-search','period']) $(id).value='';
   inventory.clear();
   document.body.classList.remove('is-authenticated');$('auth-layout').hidden=false;
   authenticated=false;csrfToken=null;requestVersion++;clearTimeout(searchTimer);
@@ -142,12 +149,16 @@ function showLogin(text='') {
   $('login-message').textContent=text;$('password').value='';$('signup-confirm-password').value='';
 }
 async function signedIn(status) {
+  authGeneration++;
   document.body.classList.add('is-authenticated');$('auth-layout').hidden=true;
   authenticated=true;csrfToken=status.csrfToken;page=1;
   document.querySelector('.owner-avatar').textContent=status.username.slice(0,1).toUpperCase();
   $('login-view').hidden=true;$('finance-view').hidden=false;$('account-controls').hidden=false;$('owner-name').textContent=status.username;
   await initialize();
 }
+for(const [id,signup] of [['auth-signin',false],['auth-signup',true]]) $(id).addEventListener('click',()=>{
+  setAuthMode(signup);$('password').value='';$('signup-confirm-password').value='';$('login-message').textContent='';$('username').focus();
+});
 $('login-form').addEventListener('submit',async event=>{
   event.preventDefault();$('login-button').disabled=true;$('login-message').textContent='';
   try {
@@ -156,14 +167,13 @@ $('login-form').addEventListener('submit',async event=>{
     $('password').value='';$('signup-confirm-password').value='';setAuthMode(false);await signedIn(result);
   }
   catch(error){
-    if(signupMode) {try{const status=await api('/api/auth/status');if(status.configured)setAuthMode(false);}catch{}}
     $('login-message').textContent=error.message;
   }
   finally{$('login-button').disabled=false;}
 });
 $('logout').addEventListener('click',async()=>{
   if(mutating) return;
-  try{await api('/api/auth/logout',{method:'POST',body:'{}'});showLogin('Signed out.');}
+  try{await api('/api/auth/logout',{method:'POST',body:'{}'});setAuthMode(false);showLogin('Signed out.');}
   catch(error){message(error.message,true);}
 });
 $('change-password').addEventListener('click',()=>{$('password-form').reset();$('password-message').textContent='';$('password-dialog').showModal();});
@@ -172,7 +182,7 @@ $('password-form').addEventListener('submit',async event=>{
   event.preventDefault();
   if($('new-password').value!==$('confirm-password').value){$('password-message').textContent='Passwords do not match.';return;}
   $('password-save').disabled=true;
-  try{await api('/api/auth/password',{method:'POST',body:JSON.stringify({currentPassword:$('current-password').value,newPassword:$('new-password').value})});showLogin('Password changed. Please sign in again.');}
+  try{await api('/api/auth/password',{method:'POST',body:JSON.stringify({currentPassword:$('current-password').value,newPassword:$('new-password').value})});setAuthMode(false);showLogin('Password changed. Please sign in again.');}
   catch(error){$('password-message').textContent=error.message;}
   finally{$('password-save').disabled=false;}
 });
@@ -192,8 +202,10 @@ $('period').addEventListener('change',()=>{
 });
 $('export').addEventListener('click',async()=>{
   $('export').disabled=true;
+  const generation=authGeneration;
   try {
     const response=await fetch('/api/export?'+currentFilters());
+    if(generation!==authGeneration) throw new Error('Account changed. Please retry.');
     if(!response.ok){const body=await response.json();if(response.status===401)showLogin('Please sign in again.');throw new Error(body.error);}
     const blob=await response.blob(),url=URL.createObjectURL(blob),link=document.createElement('a');
     link.href=url;link.download='ledger-transactions.csv';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
