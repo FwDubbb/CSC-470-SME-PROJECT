@@ -1,8 +1,9 @@
+import { saveTransaction, deleteTransaction } from './transactions.js';
 import { validateInventory } from './inventory.js';
 ﻿import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { openDatabase, validateTransaction } from './db.js';
+import { openDatabase } from './db.js';
 import { initializeAuth, sessionFor, startSession, clearCookie, verifyPassword, hashPassword, csrfMatches, createUser } from './auth.js';
 import { databasePath, lockDatabase } from './storage.js';
 import { filters, summary, listTransactions, csv } from './queries.js';
@@ -110,6 +111,7 @@ export function createApp(filename,{secureCookies=process.env.NODE_ENV==='produc
         return respond(res,201,{id:Number(result.lastInsertRowid),...item});
       }
       if(req.method==='DELETE' && inventoryMatch) {
+        if(db.prepare('SELECT id FROM transactions WHERE inventory_id=? AND user_id=?').get(Number(inventoryMatch[1]),session.user_id)) return respond(res,409,{error:'This item has recorded sales. Keep it for sale history, or delete its sales first to restore stock.'});
         const result=db.prepare('DELETE FROM inventory WHERE id=? AND user_id=?').run(Number(inventoryMatch[1]),session.user_id);return respond(res,result.changes?200:404,result.changes?{message:'Inventory item deleted.'}:{error:'Inventory item not found.'});
       }
       if(req.method==='GET' && url.pathname==='/api/categories') return respond(res,200,db.prepare('SELECT * FROM categories ORDER BY id').all());
@@ -127,16 +129,11 @@ export function createApp(filename,{secureCookies=process.env.NODE_ENV==='produc
       }
       const match=url.pathname.match(/^\/api\/transactions\/([1-9]\d*)$/);
       if((req.method==='POST' && url.pathname==='/api/transactions') || (req.method==='PUT' && match)) {
-        const t=validateTransaction(await readBody(req),db);
-        if(match) {
-          const result=db.prepare('UPDATE transactions SET type=?,amount_cents=?,date=?,category_id=?,description=? WHERE id=? AND user_id=?').run(t.type,t.amount_cents,t.date,t.category_id,t.description,Number(match[1]),session.user_id);
-          return respond(res,result.changes?200:404,result.changes?{id:Number(match[1]),...t}:{error:'Transaction not found.'});
-        }
-        const result=db.prepare('INSERT INTO transactions(user_id,type,amount_cents,date,category_id,description) VALUES (?,?,?,?,?,?)').run(session.user_id,t.type,t.amount_cents,t.date,t.category_id,t.description);
-        return respond(res,201,{id:Number(result.lastInsertRowid),...t});
+        const transaction=saveTransaction(db,session.user_id,await readBody(req),match?Number(match[1]):null);
+        return respond(res,match?200:201,transaction);
       }
       if(req.method==='DELETE' && match) {
-        const result=db.prepare('DELETE FROM transactions WHERE id=? AND user_id=?').run(Number(match[1]),session.user_id);return respond(res,result.changes?200:404,result.changes?{message:'Transaction deleted.'}:{error:'Transaction not found.'});
+        deleteTransaction(db,session.user_id,Number(match[1]));return respond(res,200,{message:'Transaction deleted. Any linked stock has been restored.'});
       }
       respond(res,404,{error:'Not found.'});
     } catch(error) {

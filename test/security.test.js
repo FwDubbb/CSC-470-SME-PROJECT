@@ -257,7 +257,7 @@ test('original single-owner database migrates with existing credentials, record 
     const newcomer={cookie:signup.response.headers.get('set-cookie').split(';')[0],csrf:signup.data.csrfToken};
     assert.equal((await app.call('/api/transactions','GET',undefined,newcomer)).data.total,0);
     assert.deepEqual((await app.call('/api/inventory','GET',undefined,newcomer)).data,[]);
-    const {readdirSync}=await import('node:fs');assert.ok(readdirSync(join(dir,'backups')).some(name=>name.startsWith('before-accounts-')));
+    const {readdirSync}=await import('node:fs');assert.ok(readdirSync(join(dir,'backups')).some(name=>name.startsWith('before-linked-sales-')));
   }finally{if(app)await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -270,5 +270,96 @@ test('signup abuse limits are persisted and do not disable existing account sign
     assert.equal((await app.login('existing-person')).status,200);
     await app.close();app=null;app=await start(file);
     assert.equal((await app.call('/api/auth/signup','POST',{})).status,429);
+  }finally{if(app)await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('inventory sale adds income, deducts stock, and edits/deletes restore the correct quantities atomically',async()=>{
+  const app=await start();
+  try {
+    await createUser(app.db,'seller',password);const auth=await app.login('seller');
+    const notebook=(await app.call('/api/inventory','POST',{name:'Notebook',quantity:5,unit_price:'5.00'},auth)).data;
+    const pen=(await app.call('/api/inventory','POST',{name:'Pen',quantity:10,unit_price:'2.00'},auth)).data;
+    const payload={inventory_id:notebook.id,quantity:1,date:'2026-10-28',description:''};
+    const created=await app.call('/api/transactions','POST',payload,auth);assert.equal(created.status,201);
+    const id=created.data.id;
+    assert.equal(created.data.amount_cents,500);assert.equal(created.data.type,'income');assert.equal(created.data.sale_item_name,'Notebook');
+    const csv=(await app.call('/api/export','GET',undefined,auth)).data;assert.ok(csv.includes('Item sold'));assert.ok(csv.includes('Notebook'));assert.ok(csv.includes('5.00'));
+    const stock=async itemId=>(await app.call('/api/inventory','GET',undefined,auth)).data.find(item=>item.id===itemId).quantity;
+    const income=async()=>(await app.call('/api/summary','GET',undefined,auth)).data.allTime.income;
+    assert.equal(await stock(notebook.id),4);assert.equal(await income(),500);
+    assert.equal((await app.call('/api/transactions/'+id,'PUT',{...payload,quantity:2},auth)).status,200);
+    assert.equal(await stock(notebook.id),3);assert.equal(await income(),1000);
+    const before=(await app.call('/api/transactions','GET',undefined,auth)).data.items[0];
+    assert.equal((await app.call('/api/transactions/'+id,'PUT',{...payload,quantity:99},auth)).status,409);
+    assert.equal(await stock(notebook.id),3);assert.equal(await income(),1000);
+    assert.deepEqual((await app.call('/api/transactions','GET',undefined,auth)).data.items[0],before);
+    assert.equal((await app.call('/api/transactions/'+id,'PUT',{...payload,inventory_id:pen.id,quantity:3},auth)).status,200);
+    assert.equal(await stock(notebook.id),5);assert.equal(await stock(pen.id),7);assert.equal(await income(),600);
+    assert.equal((await app.call('/api/inventory/'+pen.id,'DELETE',undefined,auth)).status,409);
+    // Price and name edits never rewrite the price/name of a recorded sale.
+    assert.equal((await app.call('/api/inventory/'+pen.id,'PUT',{name:'Blue pen',quantity:7,unit_price:'9.00'},auth)).status,200);
+    assert.equal(await income(),600);
+    const historical=(await app.call('/api/transactions','GET',undefined,auth)).data.items[0];assert.equal(historical.sale_unit_price_cents,200);assert.equal(historical.sale_item_name,'Pen');
+    assert.equal((await app.call('/api/transactions/'+id,'PUT',{...payload,inventory_id:pen.id,quantity:2},auth)).status,200);
+    assert.equal(await income(),400);assert.equal(await stock(pen.id),8);
+    assert.equal((await app.call('/api/transactions/'+id,'DELETE',undefined,auth)).status,200);
+    assert.equal(await stock(pen.id),10);assert.equal(await income(),0);
+    assert.equal((await app.call('/api/transactions/'+id,'DELETE',undefined,auth)).status,404);assert.equal(await stock(pen.id),10);
+    // Manual records still have no stock effects, including the Sales category.
+    const manual=await app.call('/api/transactions','POST',{type:'income',amount:'5.00',date:'2026-10-28',category_id:1,description:'Manual sale'},auth);
+    assert.equal(manual.status,201);assert.equal(await stock(notebook.id),5);
+    assert.equal((await app.call('/api/transactions/'+manual.data.id,'PUT',{...payload,quantity:1},auth)).status,200);assert.equal(await stock(notebook.id),4);
+    assert.equal((await app.call('/api/transactions/'+manual.data.id,'PUT',{inventory_id:null,type:'expense',amount:'3.00',date:'2026-10-28',category_id:4,description:'Correction'},auth)).status,200);assert.equal(await stock(notebook.id),5);
+  }finally{await app.close();}
+});
+
+test('sale validation, overselling protection, account isolation, concurrency, restart and backup recovery',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'tallyroom-sales-')),file=join(dir,'db.sqlite'),snapshot=join(dir,'snapshot.sqlite');let app;
+  try {
+    app=await start(file);await createUser(app.db,'seller-a',password);await createUser(app.db,'seller-b',password);
+    let a=await app.login('seller-a'),b=await app.login('seller-b');
+    const item=(await app.call('/api/inventory','POST',{name:'Notebook',quantity:1,unit_price:'5.00'},a)).data;
+    const sale={inventory_id:item.id,quantity:1,unit_price:'5.00',date:'2026-10-28'};
+    assert.equal((await app.call('/api/transactions','POST',sale,b)).status,404);
+    assert.equal((await app.call('/api/transactions','POST',sale)).status,401);
+    assert.equal((await app.call('/api/transactions','POST',sale,a,{'X-CSRF-Token':''})).status,403);
+    for(const bad of [{...sale,quantity:0},{...sale,quantity:-1},{...sale,quantity:1.5},{...sale,quantity:'1'},{...sale,inventory_id:999},{...sale,unit_price:'0.00'},{...sale,unit_price:'5.001'},{...sale,unit_price:5.001},{...sale,type:'expense'},{...sale,date:'2026-02-30'},{...sale,description:'x'.repeat(251)}]) assert.ok([400,404].includes((await app.call('/api/transactions','POST',bad,a)).status));
+    assert.equal((await app.call('/api/inventory','GET',undefined,a)).data[0].quantity,1);
+    const requests=await Promise.all([app.call('/api/transactions','POST',sale,a),app.call('/api/transactions','POST',sale,a)]);
+    assert.deepEqual(requests.map(r=>r.status).sort(),[201,409]);
+    const id=requests.find(r=>r.status===201).data.id;
+    assert.equal((await app.call('/api/summary','GET',undefined,a)).data.allTime.income,500);
+    assert.equal((await app.call('/api/summary','GET',undefined,b)).data.allTime.income,0);
+    assert.equal((await app.call('/api/transactions/'+id,'DELETE',undefined,b)).status,404);
+    assert.equal((await app.call('/api/inventory','GET',undefined,a)).data[0].quantity,0);
+    await app.close();app=null;app=await start(file);a=await app.login('seller-a');
+    assert.equal((await app.call('/api/transactions','GET',undefined,a)).data.items[0].sale_quantity,1);
+    await app.close();app=null;await makeBackup(file,snapshot);await restoreBackup(snapshot,file,join(dir,'before.sqlite'));app=await start(file);a=await app.login('seller-a');
+    assert.equal((await app.call('/api/inventory','GET',undefined,a)).data[0].quantity,0);
+    assert.equal((await app.call('/api/transactions/'+id,'DELETE',undefined,a)).status,200);
+    assert.equal((await app.call('/api/inventory','GET',undefined,a)).data[0].quantity,1);
+  }finally{if(app)await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('linked-sale migration preserves existing records and stock for multiple accounts',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'tallyroom-sales-migration-')),file=join(dir,'old.sqlite');let app;
+  try {
+    const hash=await hashPassword(password),old=new DatabaseSync(file);
+    old.exec(`CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT NOT NULL COLLATE NOCASE UNIQUE,password_hash TEXT NOT NULL);
+      CREATE TABLE categories(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,type TEXT NOT NULL,UNIQUE(id,type));INSERT INTO categories VALUES(1,'Sales','income');
+      CREATE TABLE transactions(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),type TEXT NOT NULL,amount_cents INTEGER NOT NULL,date TEXT NOT NULL,category_id INTEGER NOT NULL,description TEXT NOT NULL,FOREIGN KEY(category_id,type) REFERENCES categories(id,type));
+      CREATE TABLE inventory(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),name TEXT NOT NULL,quantity INTEGER NOT NULL,unit_price_cents INTEGER NOT NULL,UNIQUE(user_id,name));`);
+    old.prepare('INSERT INTO users VALUES (1,?,?),(2,?,?)').run('legacy-a',hash,'legacy-b',hash);
+    old.exec("INSERT INTO transactions VALUES(7,1,'income',500,'2026-10-28',1,'Old A'),(8,2,'income',900,'2026-10-28',1,'Old B');INSERT INTO inventory VALUES(3,1,'Notebook',2,500),(4,2,'Pen',6,100);PRAGMA user_version=2");old.close();
+    app=await start(file);const a=await app.login('legacy-a'),b=await app.login('legacy-b');
+    assert.equal((await app.call('/api/summary','GET',undefined,a)).data.allTime.income,500);
+    assert.equal((await app.call('/api/summary','GET',undefined,b)).data.allTime.income,900);
+    assert.equal((await app.call('/api/transactions','GET',undefined,a)).data.items[0].id,7);
+    assert.equal((await app.call('/api/transactions','GET',undefined,b)).data.items[0].inventory_id,null);
+    assert.equal((await app.call('/api/inventory','GET',undefined,a)).data[0].quantity,2);
+    assert.equal((await app.call('/api/inventory','GET',undefined,b)).data[0].quantity,6);
+    assert.equal((await app.call('/api/transactions','POST',{inventory_id:3,quantity:1,date:'2026-10-28'},a)).status,201);
+    assert.equal((await app.call('/api/inventory','GET',undefined,a)).data[0].quantity,1);
+    assert.equal((await app.call('/api/summary','GET',undefined,a)).data.allTime.income,1000);
   }finally{if(app)await app.close();rmSync(dir,{recursive:true,force:true});}
 });

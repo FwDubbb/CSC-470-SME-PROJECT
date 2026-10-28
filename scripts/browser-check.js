@@ -57,7 +57,7 @@ try {
   await evaluate("document.getElementById('item-name').value='Notebook';document.getElementById('item-quantity').value='10';document.getElementById('item-price').value='3.25';document.getElementById('inventory-form').requestSubmit()");
   await wait("document.querySelectorAll('#inventory-items tr').length===1 && !document.getElementById('inventory-fields').disabled");
   assert.equal(await evaluate("document.querySelectorAll('#inventory-items td')[1].textContent"),'10');
-  await evaluate("document.querySelector('#inventory-items .actions button').click();document.getElementById('item-quantity').value='0';document.getElementById('inventory-form').requestSubmit()");
+  await evaluate("[...document.querySelectorAll('#inventory-items .actions button')].find(button=>button.textContent==='Edit').click();document.getElementById('item-quantity').value='0';document.getElementById('inventory-form').requestSubmit()");
   await wait("document.querySelector('#inventory-items .badge').textContent==='Out of stock' && !document.getElementById('inventory-fields').disabled");
   await evaluate("document.getElementById('inventory-search').value='missing';document.getElementById('inventory-search').dispatchEvent(new Event('input'))");
   assert.equal(await evaluate("document.querySelectorAll('#inventory-items tr').length"),0);
@@ -102,8 +102,28 @@ try {
   assert.equal(await evaluate("document.querySelectorAll('#transactions tr').length"),1);
   assert.equal(await evaluate("document.querySelectorAll('#inventory-items tr').length"),0);
   assert.ok(!(await evaluate("document.getElementById('transactions').textContent")).includes('Second person'));
+  await evaluate("document.getElementById('item-name').value='Notebook for sales';document.getElementById('item-quantity').value='3';document.getElementById('item-price').value='5.00';document.getElementById('inventory-form').requestSubmit()");
+  await wait("document.querySelectorAll('#inventory-items tr').length===1 && !document.getElementById('inventory-fields').disabled");
+  await evaluate("[...document.querySelectorAll('#inventory-items button')].find(button=>button.textContent==='Sell').click()");
+  assert.equal(await evaluate("document.getElementById('entry-mode').value"),'sale');
+  assert.equal(await evaluate("document.getElementById('amount').value"),'5.00');
+  const saleScreen=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});writeFileSync(join(artifacts,'record-sale.png'),Buffer.from(saleScreen.data,'base64'));
+  await evaluate("document.getElementById('transaction-form').requestSubmit()");
+  await wait("document.getElementById('balance').textContent==='$155.25' && document.querySelectorAll('#inventory-items td')[1].textContent==='2' && !document.getElementById('entry-fields').disabled");
+  assert.ok((await evaluate("document.querySelector('#transactions .sale-detail').textContent")).includes('1 x Notebook for sales'));
+  await evaluate("[...document.querySelectorAll('#transactions tr:first-child .actions button')].find(button=>button.textContent==='Edit').click();document.getElementById('sale-quantity').value='2';document.getElementById('sale-quantity').dispatchEvent(new Event('input'));document.getElementById('transaction-form').requestSubmit()");
+  await wait("document.getElementById('balance').textContent==='$160.25' && document.querySelectorAll('#inventory-items td')[1].textContent==='1' && !document.getElementById('entry-fields').disabled");
+  await evaluate("[...document.querySelectorAll('#transactions tr:first-child .actions button')].find(button=>button.textContent==='Edit').click();document.getElementById('sale-quantity').value='9';document.getElementById('sale-quantity').dispatchEvent(new Event('input'));document.getElementById('transaction-form').requestSubmit()");
+  await wait("document.getElementById('message').textContent.includes('Not enough stock') && !document.getElementById('entry-fields').disabled");
+  assert.equal(await evaluate("document.getElementById('balance').textContent"),'$160.25');
+  assert.equal(await evaluate("document.querySelectorAll('#inventory-items td')[1].textContent"),'1');
+  await evaluate("document.getElementById('cancel').click();document.querySelector('#transactions tr:first-child .delete').click()");await wait("document.getElementById('delete-dialog').open");
+  assert.ok((await evaluate("document.getElementById('delete-transaction-note').textContent")).includes('restores 2'));
+  await evaluate("document.querySelector('#delete-dialog button[value=delete]').click()");
+  await wait("document.getElementById('balance').textContent==='$150.25' && document.querySelectorAll('#inventory-items td')[1].textContent==='3' && !document.getElementById('entry-fields').disabled");
+  assert.equal(await evaluate("document.getElementById('message').classList.contains('error')"),false);
   assert.deepEqual(errors,[]);
-  console.log('Browser checks passed: first-run signup, automatic login, subsequent sign-in, income/expense entry, edit, duplicate review, filtering, totals, delete confirmation, mobile layout, inventory CRUD/search/reload, logout, and separate-account data isolation. Screenshots: artifacts/desktop.png and artifacts/mobile.png');
+  console.log('Browser checks passed: first-run signup, automatic login, subsequent sign-in, income/expense entry, edit, duplicate review, filtering, totals, delete confirmation, mobile layout, inventory CRUD/search/reload, logout, and separate-account data isolation, linked sales, stock adjustments, and overselling protection. Screenshots: artifacts/desktop.png and artifacts/mobile.png');
 } finally {
   try{await closeBrowser?.();await new Promise(r=>setTimeout(r,500));}catch{}
   socket?.close();

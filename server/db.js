@@ -12,10 +12,10 @@ export function openDatabase(filename) {
   try {
     const oldUsers=db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
     const oldTransactions=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'").get();
-    const needsMigration=(oldUsers && /CHECK\s*\(\s*id\s*=\s*1\s*\)/i.test(oldUsers.sql)) || (oldTransactions && !db.prepare('PRAGMA table_info(transactions)').all().some(column=>column.name==='user_id'));
+    const needsMigration=(oldUsers && /CHECK\s*\(\s*id\s*=\s*1\s*\)/i.test(oldUsers.sql)) || (oldTransactions && !db.prepare('PRAGMA table_info(transactions)').all().some(column=>column.name==='user_id')) || (oldTransactions && !db.prepare('PRAGMA table_info(transactions)').all().some(column=>column.name==='inventory_id'));
     if(filename!==':memory:' && needsMigration) {
       const folder=join(dirname(filename),'backups');mkdirSync(folder,{recursive:true});
-      db.prepare('VACUUM INTO ?').run(join(folder,'before-accounts-'+Date.now()+'-'+randomUUID()+'.sqlite'));
+      db.prepare('VACUUM INTO ?').run(join(folder,'before-linked-sales-'+Date.now()+'-'+randomUUID()+'.sqlite'));
     }
     initializeSchema(db);
   }catch(error){db.close();throw error;}

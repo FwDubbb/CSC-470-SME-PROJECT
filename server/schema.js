@@ -9,7 +9,13 @@ const transactionTable=name=>`CREATE TABLE ${name} (
   amount_cents INTEGER NOT NULL CHECK(amount_cents BETWEEN 1 AND 999999999),
   date TEXT NOT NULL, category_id INTEGER NOT NULL,
   description TEXT NOT NULL DEFAULT '' CHECK(length(description)<=250),
-  FOREIGN KEY(category_id,type) REFERENCES categories(id,type)
+  inventory_id INTEGER REFERENCES inventory(id) ON DELETE RESTRICT,
+  sale_quantity INTEGER, sale_unit_price_cents INTEGER, sale_item_name TEXT,
+  FOREIGN KEY(category_id,type) REFERENCES categories(id,type),
+  CHECK ((inventory_id IS NULL AND sale_quantity IS NULL AND sale_unit_price_cents IS NULL AND sale_item_name IS NULL)
+    OR (inventory_id IS NOT NULL AND type='income' AND typeof(sale_quantity)='integer' AND sale_quantity BETWEEN 1 AND 1000000
+      AND typeof(sale_unit_price_cents)='integer' AND sale_unit_price_cents BETWEEN 1 AND 999999999
+      AND sale_item_name IS NOT NULL AND length(sale_item_name) BETWEEN 1 AND 100 AND amount_cents=sale_quantity*sale_unit_price_cents))
 )`;
 const inventoryTable=name=>`CREATE TABLE ${name} (
   id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
@@ -50,13 +56,14 @@ export function initializeSchema(db) {
       ['inventory',inventoryTable,'id,name,quantity,unit_price_cents']
     ]) {
       if(!table(name)) db.exec(definition(name));
-      else if(!owned(name)) {
+      else if(!owned(name) || (name==='transactions' && !db.prepare('PRAGMA table_info(transactions)').all().some(column=>column.name==='inventory_id'))) {
         db.exec(definition(name+'_upgrade'));
-        db.exec(`INSERT INTO ${name}_upgrade(user_id,${fields}) SELECT ${owner},${fields} FROM ${name}; DROP TABLE ${name}; ALTER TABLE ${name}_upgrade RENAME TO ${name}`);
+        const ownerExpression=owned(name)?'user_id':String(owner);
+        db.exec(`INSERT INTO ${name}_upgrade(user_id,${fields}) SELECT ${ownerExpression},${fields} FROM ${name}; DROP TABLE ${name}; ALTER TABLE ${name}_upgrade RENAME TO ${name}`);
       }
     }
     if(legacyUsers) db.exec('DELETE FROM sessions');
-    db.exec('CREATE INDEX IF NOT EXISTS transactions_owner_date ON transactions(user_id,date DESC,id DESC); PRAGMA user_version=2');
+    db.exec('CREATE INDEX IF NOT EXISTS transactions_owner_date ON transactions(user_id,date DESC,id DESC); PRAGMA user_version=3');
     if(db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Database migration found broken relationships. Original data was preserved.');
     db.exec('COMMIT');
   } catch(error) {db.exec('ROLLBACK');throw error;}

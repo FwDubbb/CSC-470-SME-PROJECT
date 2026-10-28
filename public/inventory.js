@@ -1,4 +1,4 @@
-﻿export function createInventory({api,money}) {
+﻿export function createInventory({api,money,onChange=()=>{},onSell=()=>{}}) {
   const $=id=>document.getElementById(id);
   let items=[],editingId=null,mutating=false,generation=0;
   const notice=(text,error=false)=>{$('inventory-message').textContent=text;$('inventory-message').className=error?'error':'';};
@@ -17,8 +17,8 @@
       for(const value of [item.name,item.quantity,money(item.unit_price_cents)]) {const cell=document.createElement('td');cell.textContent=value;row.append(cell);}
       const status=document.createElement('td'),badge=document.createElement('span');badge.className='badge'+(item.quantity===0?' expense':'');badge.textContent=item.quantity===0?'Out of stock':'In stock';status.append(badge);row.append(status);
       const cell=document.createElement('td'),actions=document.createElement('div');actions.className='actions';
-      for(const [label,handler] of [['Edit',()=>edit(item)],['Delete',()=>remove(item)]]) {
-        const button=document.createElement('button');button.type='button';button.textContent=label;button.className=label==='Delete'?'delete':'';button.disabled=mutating;button.setAttribute('aria-label',label+' inventory item '+item.name);button.addEventListener('click',handler);actions.append(button);
+      for(const [label,handler] of [['Sell',()=>onSell(item)],['Edit',()=>edit(item)],['Delete',()=>remove(item)]]) {
+        const button=document.createElement('button');button.type='button';button.textContent=label;button.className=label==='Delete'?'delete':'';button.disabled=mutating || (label==='Sell' && item.quantity===0);button.setAttribute('aria-label',label+' inventory item '+item.name);button.addEventListener('click',handler);actions.append(button);
       }
       cell.append(actions);row.append(cell);$('inventory-items').append(row);
     }
@@ -28,7 +28,7 @@
     const version=++generation;
     const result=await api('/api/inventory');
     if(version!==generation) return;
-    items=result;render();$('inventory-retry').hidden=true;
+    items=result;onChange(items);render();$('inventory-retry').hidden=true;
   }
   async function load() {try{await refresh();}catch(error){notice('Could not refresh inventory: '+error.message,true);$('inventory-retry').hidden=false;}}
   function edit(item) {
@@ -54,5 +54,5 @@
     catch(error){notice(error.message,true);}finally{busy(false);}
   });
   $('inventory-cancel').addEventListener('click',resetForm);$('inventory-search').addEventListener('input',render);$('inventory-retry').addEventListener('click',load);
-  return {load,clear(){generation++;items=[];resetForm();$('inventory-search').value='';$('inventory-delete-dialog').close();notice('');render();}};
+  return {load,clear(){generation++;items=[];onChange(items);resetForm();$('inventory-search').value='';$('inventory-delete-dialog').close();notice('');render();}};
 }

@@ -26,5 +26,5 @@ function csvCell(value) {
   return '"'+text.replaceAll('"','""')+'"';
 }
 export function csv(rows) {
-  return '\uFEFF'+[['Date','Description','Category','Type','Amount (USD)'],...rows.map(t=>[t.date,t.description,t.category,t.type,(t.amount_cents/100).toFixed(2)])].map(row=>row.map(csvCell).join(',')).join('\r\n')+'\r\n';
+  return '\uFEFF'+[['Date','Description','Category','Type','Amount (USD)','Item sold','Quantity sold','Sale unit price (USD)'],...rows.map(t=>[t.date,t.description,t.category,t.type,(t.amount_cents/100).toFixed(2),t.sale_item_name || '',t.sale_quantity ?? '',t.sale_unit_price_cents===null?'':(t.sale_unit_price_cents/100).toFixed(2)])].map(row=>row.map(csvCell).join(',')).join('\r\n')+'\r\n';
 }

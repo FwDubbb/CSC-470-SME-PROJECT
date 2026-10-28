@@ -2,6 +2,7 @@ import { createInventory } from './inventory.js';
 ﻿const $ = (id) => document.getElementById(id);
 const form = $('transaction-form');
 const money = (cents) => new Intl.NumberFormat('en-US', {style:'currency',currency:'USD'}).format(cents/100);
+let saleItems=[],editingSale=null;
 let categories=[], records=[], editingId=null, requestVersion=0, mutating=false;
 let authGeneration=0;
 let csrfToken=null, page=1, total=0, authenticated=false, signupMode=false;
@@ -15,14 +16,43 @@ async function api(path,options={}) {
   if(!response.ok) throw new Error(body.error || 'Something went wrong. Please retry.');
   return body;
 }
-const inventory=createInventory({api,money});
+const inventory=createInventory({api,money,onChange:syncSaleItems,onSell:startSale});
+function isSale() {return $('entry-mode').value==='sale';}
+function syncSaleItems(items) {
+  saleItems=items;const selected=$('sale-item').value;
+  $('sale-item').replaceChildren(new Option(items.length?'Choose an item':'Add an inventory item first',''),...items.map(item=>new Option(item.name+' ('+item.quantity+' in stock)',item.id)));
+  if(items.some(item=>String(item.id)===selected))$('sale-item').value=selected;
+  updateSaleTotal();
+}
+function updateSaleTotal() {
+  if(!isSale())return;
+  const item=saleItems.find(item=>item.id===Number($('sale-item').value));
+  const available=(item?.quantity || 0)+(editingSale && item && editingSale.inventory_id===item.id?editingSale.sale_quantity:0);
+  $('sale-stock').textContent=item?available+' available for this sale. Stock updates when you save.':'Choose an item from your inventory.';
+  const price=$('sale-price').value,quantity=Number($('sale-quantity').value);
+  if(!/^\d+(\.\d{1,2})?$/.test(price)||!Number.isSafeInteger(quantity)||quantity<1){$('amount').value='';return;}
+  const [whole,fraction='']=price.split('.'),cents=Number(whole)*100+Number(fraction.padEnd(2,'0'));
+  $('amount').value=(cents*quantity/100).toFixed(2);
+}
+function setEntryMode() {
+  const sale=isSale();$('sale-fields').hidden=!sale;$('type-choice').hidden=sale;
+  for(const id of ['sale-item','sale-quantity','sale-price']) {$(id).disabled=!sale;$(id).required=sale;}
+  for(const radio of form.elements.type)radio.disabled=sale;
+  $('category').disabled=sale;$('amount').readOnly=sale;$('amount-label').textContent=sale?'Sale total (USD)':'Amount (USD)';
+  if(sale){form.elements.type.value='income';fillCategories();$('category').value=categories.find(category=>category.name==='Sales' && category.type==='income')?.id || '';updateSaleTotal();}
+  if(!editingId)$('save').textContent=sale?'Record sale':'Add transaction';
+}
+function startSale(item) {
+  if(mutating)return;resetForm();$('entry-mode').value='sale';setEntryMode();$('sale-item').value=item.id;$('sale-price').value=item.unit_price_cents?(item.unit_price_cents/100).toFixed(2):'';updateSaleTotal();
+  form.scrollIntoView({block:'center'});$('sale-quantity').focus();
+}
 function fillCategories() {
   const current=$('category').value;
   $('category').replaceChildren(...categories.filter(c=>c.type===form.elements.type.value).map(c=>new Option(c.name,c.id)));
   if([...$('category').options].some(o=>o.value===current)) $('category').value=current;
 }
 function resetForm() {
-  editingId=null; form.reset();
+  editingId=null;editingSale=null;form.reset();setEntryMode();
   const today=new Date();
   $('date').value=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
   fillCategories(); $('form-title').textContent='New entry'; $('save').textContent='Add transaction'; $('cancel').hidden=true;
@@ -36,7 +66,8 @@ function render() {
     const description=document.createElement('span');description.className='description';description.textContent=record.description || 'No description';description.title=description.textContent;
     const date=document.createElement('span');date.className='date';date.textContent=new Date(record.date+'T12:00:00').toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'});
     detail.append(description,date);
-    const type=cell(''); const badge=document.createElement('span');badge.className=`badge ${record.type}`;badge.textContent=record.type==='income'?'Income':'Expense';type.append(badge);
+    if(record.inventory_id){const sale=document.createElement('span');sale.className='sale-detail';sale.textContent=record.sale_quantity+' x '+record.sale_item_name+' @ '+money(record.sale_unit_price_cents);detail.append(sale);}
+    const type=cell(''); const badge=document.createElement('span');badge.className=`badge ${record.type}`;badge.textContent=record.inventory_id?'Sale':record.type==='income'?'Income':'Expense';type.append(badge);
     const actionCell=cell(''); const actions=document.createElement('div');actions.className='actions';
     for(const [label,handler] of [['Edit',()=>edit(record)],['Duplicate',()=>duplicate(record)],['Delete',()=>remove(record)]]) {
       const button=document.createElement('button'); button.type='button';button.textContent=label;button.className=label==='Delete'?'delete':'';button.disabled=mutating;
@@ -72,13 +103,14 @@ async function refresh() {
 async function load() { try { await refresh(); } catch(error) { message('Could not refresh records: '+error.message,true);$('retry').hidden=false; } }
 function edit(record) {
   if(mutating) return;
-  editingId=record.id;form.elements.type.value=record.type;fillCategories();
+  editingId=record.id;editingSale=record.inventory_id?record:null;$('entry-mode').value=record.inventory_id?'sale':'manual';form.elements.type.value=record.type;setEntryMode();fillCategories();
+  if(record.inventory_id){$('sale-item').value=record.inventory_id;$('sale-quantity').value=record.sale_quantity;$('sale-price').value=(record.sale_unit_price_cents/100).toFixed(2);updateSaleTotal();}
   $('amount').value=(record.amount_cents/100).toFixed(2);$('date').value=record.date;$('category').value=record.category_id;$('description').value=record.description;
   $('form-title').textContent='Update entry';$('save').textContent='Save changes';$('cancel').hidden=false;
   form.scrollIntoView({behavior:'instant',block:'center'});$('amount').focus();
 }
 function duplicate(record) {
-  edit(record);editingId=null;$('form-title').textContent='Make it another';$('save').textContent='Add duplicate';
+  edit(record);editingId=null;editingSale=null;updateSaleTotal();$('form-title').textContent='Make it another';$('save').textContent='Add duplicate';
   message('Review the date and details, then save as a new transaction.');
 }
 function busy(value) { mutating=value;$('entry-fields').disabled=value;render(); }
@@ -86,27 +118,31 @@ async function remove(record) {
   if(mutating) return;
   busy(true);
   try {
-    const dialog=$('delete-dialog');dialog.returnValue='cancel';dialog.showModal();
+    const dialog=$('delete-dialog');$('delete-transaction-note').textContent=record.inventory_id?'Deleting this sale restores '+record.sale_quantity+' unit(s) to inventory and removes its income.':'This permanently removes the selected record.';dialog.returnValue='cancel';dialog.showModal();
     const confirmed=await new Promise(resolve=>dialog.addEventListener('close',()=>resolve(dialog.returnValue==='delete'),{once:true}));
     if(!confirmed) return;
     await api('/api/transactions/'+record.id,{method:'DELETE'});
     if(editingId===record.id) resetForm();
-    message('Transaction deleted.');await load();
+    message(record.inventory_id?'Sale deleted. Stock restored.':'Transaction deleted.');await Promise.all([load(),inventory.load()]);
   } catch(error) { message(error.message,true); }
   finally {busy(false);}
 }
 form.addEventListener('submit',async event=>{
   event.preventDefault();if(mutating || !form.reportValidity()) return;
   const wasEditing=editingId;
-  const payload={type:form.elements.type.value,amount:$('amount').value,date:$('date').value,category_id:Number($('category').value),description:$('description').value};
+  const payload={type:form.elements.type.value,amount:$('amount').value,date:$('date').value,category_id:Number($('category').value),description:$('description').value,inventory_id:isSale()?Number($('sale-item').value):null,...(isSale()?{quantity:Number($('sale-quantity').value),unit_price:$('sale-price').value}:{})};
+  const sale=isSale();
   busy(true);
   try {
     await api('/api/transactions'+(wasEditing?'/'+wasEditing:''),{method:wasEditing?'PUT':'POST',body:JSON.stringify(payload)});
-    resetForm();message(wasEditing?'Transaction updated.':'Transaction added.');await load();
+    resetForm();message(sale?'Sale saved. Income and stock updated.':wasEditing?'Transaction updated.':'Transaction added.');await Promise.all([load(),inventory.load()]);
   } catch(error) { message(error.message,true); }
   finally {busy(false);}
 });
 for(const radio of form.elements.type) radio.addEventListener('change',fillCategories);
+$('entry-mode').addEventListener('change',setEntryMode);
+$('sale-item').addEventListener('change',()=>{const item=saleItems.find(item=>item.id===Number($('sale-item').value));$('sale-price').value=item?.unit_price_cents?(item.unit_price_cents/100).toFixed(2):'';updateSaleTotal();});
+for(const id of ['sale-quantity','sale-price'])$(id).addEventListener('input',updateSaleTotal);
 $('cancel').addEventListener('click',resetForm);
 for(const id of ['filter-type','filter-category','filter-start','filter-end','page-size']) $(id).addEventListener('change',()=>{page=1;if(id==='filter-start'||id==='filter-end') $('period').value='';void load();});
 let searchTimer;
@@ -142,7 +178,7 @@ function showLogin(text='') {
   inventory.clear();
   document.body.classList.remove('is-authenticated');$('auth-layout').hidden=false;
   authenticated=false;csrfToken=null;requestVersion++;clearTimeout(searchTimer);
-  records=[];total=0;editingId=null;render();form.reset();
+  records=[];total=0;editingId=null;editingSale=null;render();form.reset();setEntryMode();
   for(const name of ['income','expenses','balance']) {$(name).textContent='\u2014';$('filtered-'+name).textContent='\u2014';}
   $('finance-view').hidden=true;$('account-controls').hidden=true;$('login-view').hidden=false;
   $('delete-dialog').close();$('password-dialog').close();$('password-form').reset();

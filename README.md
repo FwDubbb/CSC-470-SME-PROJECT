@@ -18,7 +18,7 @@ Open **http://localhost:3000**. Select **Create account** to register or **Sign 
 
 Choose a username of 3-40 letters/digits/dots/underscores/hyphens and a unique password of 15-128 characters. No default password is shipped. Stop with Ctrl+C. The dev command enables server auto-restart; npm start runs without watching files. Node 24.10 may print an experimental SQLite warning.
 
-Existing single-owner databases migrate automatically: existing credentials stay valid and existing transactions/inventory belong to that account. Before migration, a recovery snapshot is saved under data/backups/before-accounts-*.sqlite. Existing sessions are revoked during the upgrade; sign in again. If a legacy database never had an account, its records are assigned to the first account created. New accounts never inherit another registered account's data. Signup also works in HTTPS production configurations; terminal account creation remains optional.
+Existing single-owner databases migrate automatically: existing credentials stay valid and existing transactions/inventory belong to that account. Before migration, a recovery snapshot is saved under data/backups/before-linked-sales-*.sqlite. Existing sessions are revoked during the upgrade; sign in again. If a legacy database never had an account, its records are assigned to the first account created. New accounts never inherit another registered account's data. Signup also works in HTTPS production configurations; terminal account creation remains optional.
 
 ## Usage
 
@@ -39,7 +39,18 @@ Amounts are USD, stored as integer cents, and must be between $0.01 and $9,999,9
 
 Use the Inventory link to add items with a name, quantity in stock, and unit price in USD. Search by name, edit to update stock or price, and delete after confirmation. Zero quantity is marked Out of stock. Item names are unique within your account without regard to letter case. Other accounts can use the same item names. Quantities are whole numbers from 0 to 1,000,000; prices can be zero and allow at most two decimal places.
 
-Inventory is intentionally manual: stock changes do not create financial transactions, and income entries do not reduce stock. There are no suppliers, purchase orders, automatic sales processing, stock-movement history, or additional inventory reports. Inventory requires login and shares the existing database and backups. Older finance-only backups restore successfully with an empty inventory list.
+### Record a sale from inventory
+
+Click **Sell** beside an inventory item, or choose **Inventory sale** in the transaction form. Select the item and quantity. Its inventory price fills in automatically; you can enter the actual sale price. The total is calculated as quantity times unit price. Choose a date, optionally enter a description, and select **Record sale**.
+
+A notebook priced at $5.00 with 3 units in stock: selling 1 creates $5.00 of income in the Sales category and leaves 2 units. Saving a sale and reducing stock happen together in one database transaction. Insufficient stock rejects the whole operation. Manual income/expense entries do not affect inventory, even if categorized as Sales.
+
+Edit a sale from transaction history to change quantity, item, price, or date. The previous stock deduction is reversed and the new deduction applied atomically; a failed edit leaves both the original sale and stock unchanged. Deleting a sale restores its quantity and removes its income. Duplicating a sale creates a new sale only after saving and deducts stock again. Converting a sale to a manual entry restores the old stock.
+
+History and CSV exports retain the sold item name, quantity, and sale unit price. Later price/name changes in inventory do not rewrite past sales. An item with linked sales cannot be deleted while that history exists; keep it at zero stock, or delete its sales first (which restores stock). Sale reversal is blocked if restoration would exceed the 1,000,000-unit limit; correct stock first.
+
+Inventory requires login and uses the same account ownership as transactions. Edit stock quantities manually for restocks/corrections. There are no suppliers, purchase orders, shopping carts, multi-item orders, or stock-movement reports. Older backups still restore successfully.
+
 
 ## Password recovery
 
@@ -114,7 +125,7 @@ data/       Ignored local database and backups
 Users share one SQLite database file, with ownership enforced by the backend and foreign keys:
 
 - users(id,username,password_hash): individual accounts.
-- transactions(id,user_id,type,amount_cents,date,category_id,description): each entry belongs to one account.
+- transactions(id,user_id,type,amount_cents,date,category_id,description,inventory_id,sale_quantity,sale_unit_price_cents,sale_item_name): each entry belongs to one account; sale fields are optional for manual entries.
 - inventory(id,user_id,name,quantity,unit_price_cents): each item belongs to one account; names are unique per account.
 - categories(id,name,type): shared, read-only predefined choices; no personal data.
 - sessions and login_limits: authentication support.
@@ -158,6 +169,8 @@ History, summary, and export accept `type`, `category`, `start`, `end`, and `sea
 ```json
 {"type":"income","amount":"125.50","date":"2026-10-26","category_id":1,"description":"Sales payment"}
 ```
+
+For an inventory sale, POST the transaction with inventory_id (integer), quantity (integer), unit_price (decimal string, optional to use the stored price), date, and optional description. The server chooses the Sales category and calculates income; client-provided totals are not trusted. PUT uses the same fields. Send inventory_id:null with normal transaction fields to convert a sale to a manual entry.
 
 Write amounts are decimal strings; reads return `amount_cents` integers. Inventory writes use `{name,quantity,unit_price}`; unit_price is a decimal string, quantity is an integer, and reads return unit_price_cents.
 
